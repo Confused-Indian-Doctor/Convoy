@@ -50,7 +50,7 @@ jobs:
 
       - name: Restore matching offline region
         id: region-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           key: convoy-region-v040-${{ hashFiles('tools/fetch_shrewsbury_region.sh', 'tools/build_shrewsbury_region.py') }}
           path: |
@@ -65,6 +65,21 @@ jobs:
       - name: Build Shrewsbury offline vector region
         if: steps.region-cache.outputs.cache-hit != 'true'
         run: bash tools/fetch_shrewsbury_region.sh
+
+      - name: Preserve generated region before compiling
+        if: steps.region-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: ${{ steps.region-cache.outputs.cache-primary-key }}
+          path: |
+            app/src/main/assets/shrewsbury.pmtiles
+            app/src/main/assets/overture-shrewsbury.pmtiles
+            app/src/main/assets/route.graph
+            app/src/main/assets/places.db
+            app/src/main/assets/fonts
+            app/src/main/assets/region-provenance.json
+            build/region-cache
+
 
       - name: Build, lint and verify APKs from checked-in source
         run: |
@@ -133,6 +148,15 @@ jobs:
           path: |
             build/release/Convoy-${{ env.CONVOY_VERSION }}.apk
             build/release/signing-verification.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload the install-tested debug variant
+        if: env.CONVOY_RELEASE_SIGNED != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Convoy-${{ env.CONVOY_VERSION }}-debug-test-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
 

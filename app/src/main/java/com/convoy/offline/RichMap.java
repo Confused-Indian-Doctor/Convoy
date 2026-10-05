@@ -121,7 +121,17 @@ public final class RichMap extends FrameLayout {
  private String prop(Feature f,String k){try{return f.hasProperty(k)&&!f.getProperty(k).isJsonNull()?(f.getProperty(k).isJsonPrimitive()?f.getProperty(k).getAsString():f.getProperty(k).toString()):"";}catch(Exception e){return "";}}
  private String firstJson(String s){if(s==null||s.isEmpty())return "";try{Object value=new org.json.JSONTokener(s).nextValue();if(value instanceof org.json.JSONArray){org.json.JSONArray array=(org.json.JSONArray)value;for(int i=0;i<array.length();i++){Object item=array.opt(i);if(item instanceof String&&!((String)item).trim().isEmpty())return (String)item;}return "";}if(value instanceof String)return (String)value;}catch(Exception ignored){}return s;}
  private String addressJson(String s){if(s==null||s.isEmpty())return "";try{Object value=new org.json.JSONTokener(s).nextValue();if(value instanceof org.json.JSONArray)value=((org.json.JSONArray)value).opt(0);if(!(value instanceof org.json.JSONObject))return "";org.json.JSONObject address=(org.json.JSONObject)value;ArrayList<String> parts=new ArrayList<>();for(String key:new String[]{"freeform","locality","postcode"}){String part=address.optString(key,"");if(!part.isEmpty()&&!part.equals("null")&&!parts.contains(part))parts.add(part);}return android.text.TextUtils.join(", ",parts);}catch(Exception e){return "";}}
- public void search(String query,SearchCallback cb){if(disposed)return;ConvoyService s=ConvoyService.current;double a=Double.NaN,o=Double.NaN;if(s!=null&&s.fix!=null){a=s.fix.getLatitude();o=s.fix.getLongitude();}final double fa=a,fo=o;workers.execute(()->{try{ArrayList<PlaceInfo> r=index.search(query,fa,fo);main.post(()->{if(!disposed)cb.onResults(r);});}catch(Exception e){main.post(()->{if(!disposed)cb.onResults(new ArrayList<PlaceInfo>());});}});}
+ public void search(String query,SearchCallback cb){
+  if(disposed)return;
+  ConvoyService service=ConvoyService.current;
+  Location candidate=service==null?null:service.fix;
+  final Location near=freshFix(candidate)?new Location(candidate):null;
+  workers.execute(()->{try{
+   ArrayList<PlaceInfo> results=index.search(query,
+           near==null?Double.NaN:near.getLatitude(),near==null?Double.NaN:near.getLongitude());
+   main.post(()->{if(!disposed)cb.onResults(results);});
+  }catch(Exception error){main.post(()->{if(!disposed)cb.onResults(new ArrayList<PlaceInfo>());});}});
+ }
  public void searchCategory(String category,SearchCallback cb){search(category,cb);}
  public interface SearchCallback{void onResults(ArrayList<PlaceInfo> places);}
 }

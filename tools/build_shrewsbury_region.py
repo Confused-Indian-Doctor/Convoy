@@ -17,8 +17,8 @@ BBOX=f"{SOUTH},{WEST},{NORTH},{EAST}"
 MAGIC=0x43564731
 UA="Convoy-Android/0.4 offline-region-builder (OpenStreetMap data build)"
 ENDPOINTS=[
-    "https://overpass.kumi.systems/api/interpreter",
     "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
 ]
 
 ROAD_QUERY=f'''[out:json][timeout:240];

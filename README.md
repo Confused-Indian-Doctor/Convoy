@@ -28,7 +28,7 @@ Signing is optional at build time and uses only a supplied existing key. For a l
 
 Alternatively, provide the existing keystore through `CONVOY_KEYSTORE_BASE64`. For GitHub Actions, configure that value and the three variables above as repository/environment secrets. The workflow decodes the key into a temporary private directory and removes it after signing. Passwords reach `apksigner` through its environment interface. The public source contains no signing key or password, and no new release identity is generated.
 
-With signing configured, the build produces `build/release/Convoy-0.4.1.apk` and verifies its certificate, APK signature and alignment. Actions publishes it as `Convoy-0.4.1-installable-release`. The emulator's debug key is solely for smoke testing and cannot update an existing release installation.
+With signing configured, the build produces `build/release/Convoy-0.4.1.apk` and verifies its certificate, APK signature and alignment. Actions publishes it as `Convoy-0.4.1-installable-release`. The emulator's debug key is solely for smoke testing and cannot update an existing release installation. If private release signing is unavailable, Actions keeps the install-tested variant in a clearly labeled `Convoy-0.4.1-debug-test-apk` artifact; this is separate from the unsigned release and the existing Convoy release identity.
 
 ## Offline Shrewsbury region
 
