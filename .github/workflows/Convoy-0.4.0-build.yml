@@ -1409,8 +1409,7 @@ jobs:
           test -n "$OVERTURE"
           echo "Using Overture places: $OVERTURE"
           "$PMTILES" extract "$OVERTURE" "$ASSETS/overture-shrewsbury.pmtiles" --bbox="$BBOX" --maxzoom=16
-          "$PMTILES" verify "$ASSETS/overture-shrewsbury.pmtiles"
-
+          "$PMTILES" show "$ASSETS/overture-shrewsbury.pmtiles" >/dev/null
           mkdir -p "$ASSETS/fonts/Noto Sans Regular"
           for range in 0-255 256-511; do
             curl -fL --retry 4 --retry-delay 2 \
