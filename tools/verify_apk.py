@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Check the release includes its offline data and MapLibre native runtime."""
 from pathlib import Path
+import gzip
+import json
 import sqlite3
 import struct
 import sys
@@ -30,7 +32,22 @@ with ZipFile(apk) as z:
                 assert (info.header_offset + 30 + name_length + extra_length) % 4 == 0, "Android resources are not aligned"
     for name in ["assets/shrewsbury.pmtiles", "assets/overture-shrewsbury.pmtiles"]:
         with z.open(name) as f:
-            assert f.read(8) == b"PMTiles\x03", f"Invalid PMTiles v3 archive: {name}"
+            header = f.read(127)
+            assert header[:8] == b"PMTiles\x03", f"Invalid PMTiles v3 archive: {name}"
+            internal_compression = header[97]
+            assert internal_compression in (1, 2), f"Unsupported PMTiles internal compression: {name}"
+            for offset in (8, 24):
+                start, length = struct.unpack_from("<QQ", header, offset)
+                assert 127 <= start <= z.getinfo(name).file_size - length and length > 0, f"Invalid PMTiles directory/metadata range: {name}"
+                f.seek(start)
+                payload = f.read(length)
+                if internal_compression == 2:
+                    payload = gzip.decompress(payload)
+                assert payload, f"Empty PMTiles directory/metadata: {name}"
+                if offset == 24:
+                    metadata = json.loads(payload)
+                    assert isinstance(metadata, dict), f"Invalid PMTiles metadata: {name}"
+            print(f"PASS {name}: readable v3 directory and metadata (compression {internal_compression})")
     with z.open("assets/route.graph") as f:
         magic, nodes, edges, names = struct.unpack(">iiii", f.read(16))
         assert magic == 0x43564731 and nodes > 0 and edges > 0 and names > 0, "Empty/invalid routing graph"

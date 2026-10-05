@@ -31,7 +31,7 @@ public final class RichMap extends FrameLayout {
  private ArrayList<TripPlan.Waypoint> waypoints=new ArrayList<>();
  private boolean navigationMode=true,follow=true,routeBusy=false,disposed=false;
  private volatile boolean routerLoading=true;
- private double zoom=15,lastDrivingBearing=0; private long lastRouteAt=0; private int routeGeneration=0;
+ private double zoom=15,lastDrivingBearing=0; private long lastRouteAt=0; private int routeGeneration=0,styleGeneration=0;
  private float progressMeters=Float.NaN;
  private OfflineRouter.Route route; private PlaceInfo manualTarget; private String routedTargetKey="";
  private OnPlaceSelectedListener placeListener;
@@ -61,16 +61,24 @@ public final class RichMap extends FrameLayout {
  public boolean routingReady(){return router.isReady();}
  public void onStart(){mapView.onStart();} public void onResume(){mapView.onResume();} public void onPause(){mapView.onPause();} public void onStop(){mapView.onStop();} public void onLowMemory(){mapView.onLowMemory();}
  public void onSaveInstanceState(Bundle b){mapView.onSaveInstanceState(b);}
- public void dispose(){disposed=true;routeGeneration++;workers.shutdownNow();main.removeCallbacksAndMessages(null);index.close();mapView.onDestroy();}
+ public void dispose(){disposed=true;routeGeneration++;styleGeneration++;workers.shutdownNow();main.removeCallbacksAndMessages(null);index.close();mapView.onDestroy();}
 
  public void load(){
   if(map==null||disposed)return;
-  try{
-   String json=readAsset("convoy-style.json");File imported=new File(getContext().getFilesDir(),"region.pmtiles");String base=imported.exists()?"pmtiles://file://"+imported.getAbsolutePath():"pmtiles://asset://shrewsbury.pmtiles";
-   json=json.replace("__BASEMAP_URI__",escapeJson(base)).replace("__PLACES_URI__","pmtiles://asset://overture-shrewsbury.pmtiles");
-   mapName=imported.exists()?getContext().getSharedPreferences("convoy",0).getString("mapName","Imported vector region"):"Shrewsbury rich offline vector map";
-   style=null;map.setStyle(new Style.Builder().fromJson(json),s->{if(disposed)return;style=s;addCarImages(s);updateDynamic();map.setCameraPosition(new CameraPosition.Builder().target(new LatLng(52.7078,-2.7541)).zoom(13.3).build());refresh();});
-  }catch(Exception e){Toast.makeText(getContext(),"Vector map: "+e.getMessage(),Toast.LENGTH_LONG).show();}
+  final int generation=++styleGeneration;
+  final Context context=getContext().getApplicationContext();
+  final File imported=new File(context.getFilesDir(),"region.pmtiles");
+  final boolean useImported=imported.isFile();
+  mapName=useImported?context.getSharedPreferences("convoy",0).getString("mapName","Imported vector region"):"Shrewsbury rich offline vector map";
+  workers.execute(()->{try{
+   File apk=new File(context.getApplicationInfo().sourceDir),directory=new File(context.getFilesDir(),"bundled-vector-maps");
+   File basemap=useImported?imported:LocalTiles.extractAsset(apk,directory,"shrewsbury.pmtiles");
+   File places=LocalTiles.extractAsset(apk,directory,"overture-shrewsbury.pmtiles");
+   String json=readAsset("convoy-style.json")
+     .replace("__BASEMAP_URI__",escapeJson("pmtiles://"+android.net.Uri.fromFile(basemap)))
+     .replace("__PLACES_URI__",escapeJson("pmtiles://"+android.net.Uri.fromFile(places)));
+   main.post(()->{if(disposed||generation!=styleGeneration)return;style=null;map.setStyle(new Style.Builder().fromJson(json),s->{if(disposed||generation!=styleGeneration)return;style=s;addCarImages(s);updateDynamic();map.setCameraPosition(new CameraPosition.Builder().target(new LatLng(52.7078,-2.7541)).zoom(13.3).build());refresh();});});
+  }catch(Exception error){main.post(()->{if(disposed||generation!=styleGeneration)return;android.util.Log.e("ConvoyMap","Offline map preparation failed",error);Toast.makeText(getContext(),"Vector map: "+error.getMessage(),Toast.LENGTH_LONG).show();});}});
  }
  private String readAsset(String name)throws IOException{try(InputStream in=getContext().getAssets().open(name);ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[8192];int n;while((n=in.read(b))>0)out.write(b,0,n);return out.toString("UTF-8");}}
  private String escapeJson(String s){return s.replace("\\","\\\\").replace("\"","\\\"");}

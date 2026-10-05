@@ -24,6 +24,7 @@ if [[ "$skip_region" == false ]]; then
 fi
 if [[ "$skip_tests" == false ]]; then
   bash tools/run_protocol_tests.sh
+  bash tools/run_local_tiles_tests.sh
   bash tools/run_routing_tests.sh app/src/main/assets/route.graph
   python3 -m unittest discover -s tests -p 'test_*.py'
   python3 tools/run_pmtiles_validation_tests.py 2>&1 | tee build/pmtiles-validation-tests.txt

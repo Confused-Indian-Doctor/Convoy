@@ -7,14 +7,28 @@ private_dir="$(mktemp -d "${TMPDIR:-/tmp}/convoy-smoke.XXXXXX")"
 remote_ui="/sdcard/convoy-smoke-$$.xml"
 setup_open=false
 keep_gps_fresh=false
+firewall_enabled=false
+offline_chain="CVY_SMOKE_$$"
 capture_diagnostics() {
   local result=$?
   adb logcat -d > build/smoke/logcat.txt || true
   # The setup dialog contains a generated group key; keep it out of artifacts.
   if [[ "$setup_open" != true ]]; then
     adb exec-out screencap -p > build/smoke/final-state.png || true
+  elif ((result != 0)); then
+    dump_ui || true
+    if [[ -s "$private_dir/ui.xml" ]]; then
+      sanitize_setup_ui || true
+    fi
   fi
   adb shell rm -f "$remote_ui" >/dev/null 2>&1 || true
+  if [[ "$firewall_enabled" == true ]]; then
+    for firewall in iptables ip6tables; do
+      adb shell "$firewall" -D OUTPUT -j "$offline_chain" >/dev/null 2>&1 || true
+      adb shell "$firewall" -F "$offline_chain" >/dev/null 2>&1 || true
+      adb shell "$firewall" -X "$offline_chain" >/dev/null 2>&1 || true
+    done
+  fi
   rm -rf "$private_dir"
   return "$result"
 }
@@ -23,6 +37,29 @@ trap capture_diagnostics EXIT
 dump_ui() {
   adb shell uiautomator dump "$remote_ui" >/dev/null
   adb exec-out cat "$remote_ui" > "$private_dir/ui.xml"
+}
+
+sanitize_setup_ui() {
+  python3 - "$private_dir/ui.xml" build/smoke/setup-ui-sanitized.xml <<'PYSANITIZE'
+import sys
+import xml.etree.ElementTree as ET
+
+tree = ET.parse(sys.argv[1])
+nodes = list(tree.getroot().iter("node"))
+edits = [node for node in nodes if node.get("class", "").endswith("EditText")]
+values = {node.get(attribute, "") for node in edits for attribute in ("text", "content-desc", "hint")}
+values.discard("")
+for node in edits:
+    for attribute in ("text", "content-desc", "hint"):
+        node.attrib.pop(attribute, None)
+# Remove copies of field values from any inherited accessibility descriptions.
+for node in nodes:
+    for attribute, content in list(node.attrib.items()):
+        for value in values:
+            content = content.replace(value, "[redacted]")
+        node.set(attribute, content)
+tree.write(sys.argv[2], encoding="utf-8", xml_declaration=True)
+PYSANITIZE
 }
 
 # Return only coordinates/state, never UI text (which can contain a group key).
@@ -41,7 +78,7 @@ for node in nodes:
     text = attrs.get("text", "")
     matches = (
         (mode == "text" and text == value)
-        or (mode == "positive" and text == value and attrs.get("resource-id") == "android:id/button1")
+        or (mode == "positive" and text.casefold() == value.casefold() and attrs.get("resource-id") == "android:id/button1")
         or (mode == "edit" and attrs.get("class") == "android.widget.EditText")
         or (mode == "prefix" and text.startswith(value))
         or (mode == "hotspot" and attrs.get("class") == "android.widget.CheckBox" and text == value)
@@ -108,16 +145,82 @@ tap_control() {
 }
 
 assert_running() {
-  local phase=$1
+  local phase=$1 convoy_pid
   if ! adb shell pidof com.convoy.offline > "build/smoke/process-${phase}.txt" || [[ ! -s "build/smoke/process-${phase}.txt" ]]; then
     printf 'Convoy stopped during %s.\n' "$phase" >&2
     return 1
   fi
   adb logcat -d > build/smoke/logcat.txt
-  if rg -q 'FATAL EXCEPTION|Fatal signal|ANR in com.convoy.offline' build/smoke/logcat.txt; then
-    printf 'Crash or ANR detected during %s.\n' "$phase" >&2
+  if rg -q 'ANR in com.convoy.offline' build/smoke/logcat.txt; then
+    printf 'Convoy ANR detected during %s.\n' "$phase" >&2
     return 1
   fi
+  read -r convoy_pid _ < "build/smoke/process-${phase}.txt"
+  adb logcat -d --pid="$convoy_pid" > build/smoke/convoy-logcat.txt
+  if rg -q 'FATAL EXCEPTION|Fatal signal' build/smoke/convoy-logcat.txt; then
+    printf 'Convoy crash detected during %s.\n' "$phase" >&2
+    return 1
+  fi
+  if rg -q 'Mbgl.*\[Style\]: Failed to load source (basemap|overture):' build/smoke/convoy-logcat.txt; then
+    printf 'Convoy offline map source failed during %s; see convoy-logcat.txt.\n' "$phase" >&2
+    return 1
+  fi
+}
+
+verify_offline_network() {
+  local phase=$1 firewall family destination probe
+  adb shell ip address show > "build/smoke/network-addresses-${phase}.txt"
+  adb shell ip route show table all > "build/smoke/network-routes-${phase}.txt"
+  adb shell settings get global airplane_mode_on > "build/smoke/airplane-mode-${phase}.txt"
+  [[ "$(tr -d '\r\n' < "build/smoke/airplane-mode-${phase}.txt")" == 1 ]] || {
+    echo 'Airplane mode was not enabled for offline validation.' >&2; return 1;
+  }
+  : > "build/smoke/network-firewall-${phase}.txt"
+  for firewall in iptables ip6tables; do
+    adb shell "$firewall" -C OUTPUT -j "$offline_chain"
+    adb shell "$firewall" -C "$offline_chain" -j REJECT
+    printf '%s\n' "$firewall" >> "build/smoke/network-firewall-${phase}.txt"
+    adb shell "$firewall" -S "$offline_chain" >> "build/smoke/network-firewall-${phase}.txt"
+  done
+  # Direct addresses avoid mistaking a failed DNS lookup for an offline device.
+  for family in 4 6; do
+    destination=1.1.1.1
+    if [[ "$family" == 6 ]]; then destination=2606:4700:4700::1111; fi
+    probe="build/smoke/external-probe-ipv${family}-${phase}.txt"
+    if adb shell ping "-$family" -c 1 -W 2 "$destination" > "$probe" 2>&1; then
+      printf 'External IPv%s connectivity remained available during %s.\n' "$family" "$phase" >&2
+      return 1
+    fi
+    if rg -qi 'not found|invalid option|unknown option|usage:' "$probe"; then
+      printf 'Could not execute the external IPv%s connectivity probe; see %s.\n' "$family" "$probe" >&2
+      return 1
+    fi
+  done
+  for firewall in iptables ip6tables; do
+    adb shell "$firewall" -L "$offline_chain" -n -v >> "build/smoke/network-firewall-${phase}.txt"
+  done
+  printf 'PASS outbound IPv4/IPv6 rejected, loopback/ADB retained, and both external probes failed.\n' > "build/smoke/network-proof-${phase}.txt"
+}
+
+disable_external_network() {
+  adb root | tee build/smoke/adb-root.txt
+  timeout 20 adb wait-for-device
+  [[ "$(adb shell id -u | tr -d '\r\n')" == 0 ]] || {
+    echo 'Offline firewall validation requires the rootable Google APIs emulator image.' >&2; return 1;
+  }
+  adb shell cmd connectivity airplane-mode enable
+  adb shell svc wifi disable
+  adb shell svc data disable
+  firewall_enabled=true
+  for firewall in iptables ip6tables; do
+    adb shell "$firewall" -N "$offline_chain"
+    adb shell "$firewall" -A "$offline_chain" -o lo -j RETURN
+    # Emulator ADB can use TCP port 5555; permit only its reply transport.
+    adb shell "$firewall" -A "$offline_chain" -p tcp --sport 5555 -j RETURN
+    adb shell "$firewall" -A "$offline_chain" -j REJECT
+    adb shell "$firewall" -I OUTPUT 1 -j "$offline_chain"
+  done
+  verify_offline_network initial
 }
 
 wait_service() {
@@ -146,8 +249,7 @@ adb install -r "$apk" | tee build/smoke/install.txt
 for permission in ACCESS_COARSE_LOCATION ACCESS_FINE_LOCATION RECORD_AUDIO POST_NOTIFICATIONS BLUETOOTH_CONNECT NEARBY_WIFI_DEVICES; do
   adb shell pm grant com.convoy.offline "android.permission.$permission"
 done
-adb shell svc wifi disable
-adb shell svc data disable
+disable_external_network
 adb logcat -c
 adb shell am start -W -n com.convoy.offline/.MainActivity | tee build/smoke/launch.txt
 # Allow native map initialization and offline asset extraction to complete.
@@ -214,5 +316,6 @@ tap_control positive 'End trip' 'End trip confirmation button'
 keep_gps_fresh=false
 wait_service stopped
 assert_running trip-stopped
+verify_offline_network final
 printf 'PASS ending the trip stopped the service while the offline app stayed running.\n' > build/smoke/service-stop.txt
-printf 'PASS %s installed offline, started a foreground trip, received GPS, searched and routed offline, and stopped the trip on API 35.\n' "$apk" | tee build/smoke/result.txt
+printf 'PASS %s installed with external networking blocked, started a foreground trip, received GPS, searched and routed offline, and stopped the trip on API 35.\n' "$apk" | tee build/smoke/result.txt

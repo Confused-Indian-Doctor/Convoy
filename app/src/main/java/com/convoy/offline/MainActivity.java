@@ -167,7 +167,10 @@ public class MainActivity extends Activity {
   minus.setOnClickListener(v->map.changeZoom(-1));plus.setOnClickListener(v->map.changeZoom(1));
   zoom.addView(minus,new LinearLayout.LayoutParams(dp(48),dp(48)));
   LinearLayout.LayoutParams plusParams=new LinearLayout.LayoutParams(dp(48),dp(48));plusParams.leftMargin=dp(6);zoom.addView(plus,plusParams);
-  mapControls.addView(zoom);FrameLayout.LayoutParams controlsPlacement=new FrameLayout.LayoutParams(-2,-2,Gravity.BOTTOM|Gravity.END);
+  // The zoom pair needs its full 102 dp width; the vertical rail's default MATCH_PARENT
+  // child width would otherwise constrain it to a single 72 dp control and clip zoom-in.
+  mapControls.addView(zoom,new LinearLayout.LayoutParams(-2,dp(48)));
+  FrameLayout.LayoutParams controlsPlacement=new FrameLayout.LayoutParams(-2,-2,Gravity.BOTTOM|Gravity.END);
   controlsPlacement.setMargins(dp(12),0,dp(12),dp(108));mapFrame.addView(mapControls,controlsPlacement);
 
   instruments=new DrivingInstruments(this);instruments.setContentDescription("Driving instruments. GPS speed in miles per hour, G-force, pitch and roll. Tap the lower gauge to calibrate pitch and roll.");
