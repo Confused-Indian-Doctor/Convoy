@@ -1,0 +1,54 @@
+{
+  "version": 8,
+  "name": "Convoy Day",
+  "glyphs": "asset://fonts/{fontstack}/{range}.pbf",
+  "sources": {
+    "basemap": {"type":"vector","url":"__BASEMAP_URI__","attribution":"© OpenStreetMap contributors"},
+    "overture": {"type":"vector","url":"__PLACES_URI__","attribution":"© Overture Maps Foundation"},
+    "route": {"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
+    "trip": {"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
+    "waypoints": {"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
+    "crew": {"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
+    "own": {"type":"geojson","data":{"type":"FeatureCollection","features":[]}}
+  },
+  "layers": [
+    {"id":"background","type":"background","paint":{"background-color":"#f7f5f0"}},
+    {"id":"landcover","type":"fill","source":"basemap","source-layer":"landcover","paint":{"fill-color":["match",["get","kind"],"forest","#dcefd6","grassland","#e7f2df","farmland","#f1efcf","scrub","#e7efd8","urban_area","#f2f1ed","#efefe9"],"fill-opacity":0.92}},
+    {"id":"landuse","type":"fill","source":"basemap","source-layer":"landuse","paint":{"fill-color":["match",["get","kind"],"park","#d8efd4","nature_reserve","#d4ebd0","national_park","#d4ebd0","forest","#d9ead2","wood","#d9ead2","hospital","#f7dfdf","school","#f5ead7","university","#f5ead7","college","#f5ead7","commercial","#eee9e1","industrial","#e9e5e1","cemetery","#e4eadf","#f2f0eb"],"fill-opacity":0.78}},
+    {"id":"water","type":"fill","source":"basemap","source-layer":"water","paint":{"fill-color":"#b7dff4"}},
+    {"id":"water-lines","type":"line","source":"basemap","source-layer":"water","paint":{"line-color":"#93cde9","line-width":1.1}},
+    {"id":"buildings","type":"fill","source":"basemap","source-layer":"buildings","minzoom":14,"paint":{"fill-color":"#e1ddd5","fill-outline-color":"#d2cec5","fill-opacity":0.9}},
+
+    {"id":"paths","type":"line","source":"basemap","source-layer":"roads","minzoom":13,"filter":["==","kind","path"],"paint":{"line-color":"#c8c5be","line-width":["interpolate",["linear"],["zoom"],13,0.5,17,1.6],"line-dasharray":[2,2]}},
+    {"id":"minor-casing","type":"line","source":"basemap","source-layer":"roads","minzoom":12,"filter":["==","kind","minor_road"],"paint":{"line-color":"#d3d0ca","line-width":["interpolate",["linear"],["zoom"],12,1.8,16,7.2,18,12]}},
+    {"id":"minor","type":"line","source":"basemap","source-layer":"roads","minzoom":12,"filter":["==","kind","minor_road"],"paint":{"line-color":"#ffffff","line-width":["interpolate",["linear"],["zoom"],12,1.1,16,5.6,18,10.2]}},
+    {"id":"major-casing","type":"line","source":"basemap","source-layer":"roads","minzoom":8,"filter":["==","kind","major_road"],"paint":{"line-color":"#d3b889","line-width":["interpolate",["linear"],["zoom"],8,1.6,13,4.6,17,12]}},
+    {"id":"major","type":"line","source":"basemap","source-layer":"roads","minzoom":8,"filter":["==","kind","major_road"],"paint":{"line-color":"#ffd58a","line-width":["interpolate",["linear"],["zoom"],8,1.0,13,3.5,17,9.7]}},
+    {"id":"highway-casing","type":"line","source":"basemap","source-layer":"roads","minzoom":5,"filter":["==","kind","highway"],"paint":{"line-color":"#ca7f72","line-width":["interpolate",["linear"],["zoom"],5,1.6,12,5.5,17,15]}},
+    {"id":"highway","type":"line","source":"basemap","source-layer":"roads","minzoom":5,"filter":["==","kind","highway"],"paint":{"line-color":"#f7a89b","line-width":["interpolate",["linear"],["zoom"],5,1.0,12,4.1,17,12.3]}},
+    {"id":"rail","type":"line","source":"basemap","source-layer":"roads","minzoom":9,"filter":["==","kind","rail"],"paint":{"line-color":"#8a8b8e","line-width":1.2,"line-dasharray":[3,2]}},
+
+    {"id":"road-ref","type":"symbol","source":"basemap","source-layer":"roads","minzoom":10,"filter":["all",["in","kind","highway","major_road"],["has","shield_text"]],"layout":{"symbol-placement":"line","text-field":["get","shield_text"],"text-font":["Noto Sans Regular"],"text-size":10,"symbol-spacing":300},"paint":{"text-color":"#5d554c","text-halo-color":"#ffffff","text-halo-width":2}},
+    {"id":"road-label","type":"symbol","source":"basemap","source-layer":"roads","minzoom":12,"filter":["all",["in","kind","highway","major_road","minor_road"],["has","name"]],"layout":{"symbol-placement":"line","text-field":["get","name"],"text-font":["Noto Sans Regular"],"text-size":["interpolate",["linear"],["zoom"],12,10,16,13],"symbol-spacing":260,"text-max-angle":35},"paint":{"text-color":"#5f5f5b","text-halo-color":"#ffffff","text-halo-width":1.5}},
+
+    {"id":"place-city","type":"symbol","source":"basemap","source-layer":"places","filter":["in","kind_detail","city","town"],"layout":{"text-field":["get","name"],"text-font":["Noto Sans Regular"],"text-size":["interpolate",["linear"],["zoom"],7,12,13,18],"text-allow-overlap":false},"paint":{"text-color":"#30373b","text-halo-color":"#ffffff","text-halo-width":2}},
+    {"id":"place-village","type":"symbol","source":"basemap","source-layer":"places","minzoom":10,"filter":["in","kind_detail","village","hamlet","locality"],"layout":{"text-field":["get","name"],"text-font":["Noto Sans Regular"],"text-size":11},"paint":{"text-color":"#4d5558","text-halo-color":"#ffffff","text-halo-width":1.5}},
+    {"id":"place-neighbourhood","type":"symbol","source":"basemap","source-layer":"places","minzoom":13,"filter":["in","kind_detail","neighbourhood","quarter"],"layout":{"text-field":["get","name"],"text-font":["Noto Sans Regular"],"text-size":10},"paint":{"text-color":"#757a7a","text-halo-color":"#ffffff","text-halo-width":1.2}},
+
+    {"id":"poi-important-dot","type":"circle","source":"basemap","source-layer":"pois","minzoom":12.8,"filter":["in","kind","fuel","charging_station","hospital","supermarket","parking","hotel","camp_site","cafe","restaurant","pub","viewpoint","attraction"],"paint":{"circle-radius":["interpolate",["linear"],["zoom"],13,2.8,16,5.5],"circle-color":["match",["get","kind"],"fuel","#e67e22","charging_station","#20a464","hospital","#d94b55","supermarket","#3578c8","parking","#68777e","hotel","#7653b8","camp_site","#2f8d5e","cafe","#9b6846","restaurant","#b85f45","pub","#7a5a9b","viewpoint","#4b8c95","attraction","#c74d83","#607d8b"],"circle-stroke-color":"#ffffff","circle-stroke-width":1.5}},
+    {"id":"poi-dot","type":"circle","source":"basemap","source-layer":"pois","minzoom":14.5,"paint":{"circle-radius":2.6,"circle-color":"#728189","circle-stroke-color":"#ffffff","circle-stroke-width":1}},
+    {"id":"poi-important-label","type":"symbol","source":"basemap","source-layer":"pois","minzoom":13.2,"filter":["all",["in","kind","fuel","charging_station","hospital","supermarket","parking","hotel","camp_site","cafe","restaurant","pub","viewpoint","attraction"],["has","name"]],"layout":{"text-field":["get","name"],"text-font":["Noto Sans Regular"],"text-size":10,"text-offset":[0,1.1],"text-anchor":"top","text-max-width":11},"paint":{"text-color":"#3f4648","text-halo-color":"#ffffff","text-halo-width":1.5}},
+    {"id":"poi-label","type":"symbol","source":"basemap","source-layer":"pois","minzoom":15.5,"filter":["has","name"],"layout":{"text-field":["get","name"],"text-font":["Noto Sans Regular"],"text-size":10,"text-offset":[0,1.0],"text-anchor":"top","text-max-width":10},"paint":{"text-color":"#596064","text-halo-color":"#ffffff","text-halo-width":1.4}},
+
+    {"id":"overture-place-dot","type":"circle","source":"overture","source-layer":"place","minzoom":14,"paint":{"circle-radius":["interpolate",["linear"],["zoom"],14,1.8,17,4],"circle-color":"#3b82c4","circle-opacity":0.28}},
+    {"id":"overture-place-label","type":"symbol","source":"overture","source-layer":"place","minzoom":16.5,"filter":["has","@name"],"layout":{"text-field":["get","@name"],"text-font":["Noto Sans Regular"],"text-size":9,"text-offset":[0,0.9],"text-anchor":"top"},"paint":{"text-color":"#4d5a60","text-halo-color":"#ffffff","text-halo-width":1.3}},
+
+    {"id":"trip-line","type":"line","source":"trip","paint":{"line-color":"#7d8b92","line-width":2.0,"line-dasharray":[2,2],"line-opacity":0.75}},
+    {"id":"route-casing","type":"line","source":"route","paint":{"line-color":"#ffffff","line-width":["interpolate",["linear"],["zoom"],10,6,16,13],"line-opacity":0.9}},
+    {"id":"route-line","type":"line","source":"route","paint":{"line-color":"#1677ff","line-width":["interpolate",["linear"],["zoom"],10,4,16,9],"line-opacity":0.95}},
+    {"id":"waypoint-dot","type":"circle","source":"waypoints","paint":{"circle-radius":8,"circle-color":"#006e4a","circle-stroke-color":"#ffffff","circle-stroke-width":2}},
+    {"id":"waypoint-label","type":"symbol","source":"waypoints","layout":{"text-field":["get","label"],"text-font":["Noto Sans Regular"],"text-size":11,"text-offset":[0,1.3],"text-anchor":"top"},"paint":{"text-color":"#0e4435","text-halo-color":"#ffffff","text-halo-width":2}},
+    {"id":"crew-cars","type":"symbol","source":"crew","layout":{"icon-image":["get","icon"],"icon-size":0.22,"icon-allow-overlap":true,"text-field":["get","name"],"text-font":["Noto Sans Regular"],"text-size":10,"text-offset":[0,2.4],"text-anchor":"top","text-allow-overlap":true},"paint":{"text-color":"#10212b","text-halo-color":"#ffffff","text-halo-width":2}},
+    {"id":"own-car","type":"symbol","source":"own","layout":{"icon-image":["get","icon"],"icon-size":0.26,"icon-allow-overlap":true,"icon-rotation-alignment":"map","icon-rotate":["get","bearing"],"text-field":"You","text-font":["Noto Sans Regular"],"text-size":10,"text-offset":[0,2.6],"text-anchor":"top","text-allow-overlap":true},"paint":{"text-color":"#006e4a","text-halo-color":"#ffffff","text-halo-width":2}}
+  ]
+}

@@ -1,0 +1,29 @@
+# Local Android/Gradle state and generated output.
+.gradle/
+.idea/
+local.properties
+**/build/
+*.apk
+*.aab
+__pycache__/
+*.py[cod]
+
+# Private signing material must never enter this public repository.
+signing/
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+.env
+.env.*
+keystore.properties
+signing.properties
+
+# Rebuilt offline data; source scripts and map style remain in Git.
+app/src/main/assets/*.pmtiles
+app/src/main/assets/*.graph
+app/src/main/assets/*.db
+app/src/main/assets/fonts/
+app/src/main/assets/region-provenance.json
