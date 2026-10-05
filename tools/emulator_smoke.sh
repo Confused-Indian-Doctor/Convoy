@@ -298,7 +298,7 @@ assert_running() {
 }
 
 verify_offline_network() {
-  local phase=$1 firewall family destination probe
+  local phase=$1 firewall family destination probe probe_command
   adb shell ip address show > "build/smoke/network-addresses-${phase}.txt"
   adb shell ip route show table all > "build/smoke/network-routes-${phase}.txt"
   adb shell settings get global airplane_mode_on > "build/smoke/airplane-mode-${phase}.txt"
@@ -315,9 +315,10 @@ verify_offline_network() {
   # Direct addresses avoid mistaking a failed DNS lookup for an offline device.
   for family in 4 6; do
     destination=1.1.1.1
-    if [[ "$family" == 6 ]]; then destination=2606:4700:4700::1111; fi
+    probe_command=ping
+    if [[ "$family" == 6 ]]; then destination=2606:4700:4700::1111; probe_command=ping6; fi
     probe="build/smoke/external-probe-ipv${family}-${phase}.txt"
-    if adb shell ping "-$family" -c 1 -W 2 "$destination" > "$probe" 2>&1; then
+    if adb shell "$probe_command" -c 1 -W 2 "$destination" > "$probe" 2>&1; then
       printf 'External IPv%s connectivity remained available during %s.\n' "$family" "$phase" >&2
       return 1
     fi
