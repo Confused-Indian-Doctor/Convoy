@@ -1429,6 +1429,13 @@ jobs:
           set -euo pipefail
           cd v0.4.0
           printf 'android.useAndroidX=true\nandroid.enableJetifier=true\norg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8\n' > gradle.properties
+          python3 - <<'PYFIX'
+          from pathlib import Path
+          p = Path("app/src/main/java/com/convoy/offline/RichMap.java")
+          s = p.read_text(encoding="utf-8")
+          s = s.replace("import android.graphics.*;", "import android.graphics.Bitmap;\nimport android.graphics.BitmapFactory;\nimport android.graphics.PointF;")
+          p.write_text(s, encoding="utf-8")
+          PYFIX
           gradle --no-daemon --stacktrace :app:assembleRelease
           BT="$ANDROID_SDK_ROOT/build-tools/35.0.0"
           IN='app/build/outputs/apk/release/app-release-unsigned.apk'
@@ -1458,3 +1465,4 @@ jobs:
             v0.4.0/build/apk-badging.txt
           if-no-files-found: error
           retention-days: 7
+
