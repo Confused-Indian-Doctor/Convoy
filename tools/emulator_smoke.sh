@@ -89,6 +89,9 @@ import xml.etree.ElementTree as ET
 tree = ET.parse(sys.argv[1])
 nodes = list(tree.getroot().iter("node"))
 edits = [node for node in nodes if node.get("class", "").endswith("EditText")]
+with open(sys.argv[2].replace("setup-ui-sanitized.xml", "setup-field-lengths.txt"), "w") as lengths:
+    for index, node in enumerate(edits, 1):
+        lengths.write(f"field {index}: length={len(node.get('text', ''))}, focused={node.get('focused', 'false')}\n")
 values = {node.get(attribute, "") for node in edits for attribute in ("text", "content-desc", "hint")}
 values.discard("")
 for node in edits:
@@ -111,8 +114,14 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
-nodes = ET.parse(sys.argv[1]).getroot().iter("node")
+nodes = list(ET.parse(sys.argv[1]).getroot().iter("node"))
 mode, value = sys.argv[2:]
+if mode == "setup_closed":
+    if any(n.get("text") == "Bring your crew together" for n in nodes):
+        sys.exit(1)
+    print("0 0 false")
+    sys.exit(0)
+first_edit = next((n for n in nodes if n.get("class") == "android.widget.EditText"), None)
 for node in nodes:
     attrs = node.attrib
     if attrs.get("enabled") == "false":
@@ -122,6 +131,8 @@ for node in nodes:
         (mode == "text" and text == value)
         or (mode == "positive" and text.casefold() == value.casefold() and attrs.get("resource-id") == "android:id/button1")
         or (mode == "edit" and attrs.get("class") == "android.widget.EditText")
+        or (mode == "edit_focused" and node is first_edit and attrs.get("focused") == "true")
+        or (mode == "edit_text" and node is first_edit and text == value)
         or (mode == "prefix" and text.startswith(value))
         or (mode == "hotspot" and attrs.get("class") == "android.widget.CheckBox" and text == value)
         or (mode == "gps" and text.startswith("GPS ·"))
@@ -184,6 +195,43 @@ tap_control() {
   coordinates="$(wait_control "$@")"
   read -r x y checked <<< "$coordinates"
   adb shell input tap "$x" "$y"
+}
+
+enter_smoke_name() {
+  local attempt
+  tap_control edit '' 'name field'
+  wait_control edit_focused '' 'focused name field' >/dev/null
+  sleep 1 # Let the first keyboard/focus transition finish before injecting keys.
+  for attempt in 1 2; do
+    adb shell input keycombination 113 29
+    adb shell input text ConvoySmoke
+    sleep 1
+    if dump_ui && locate_ui edit_text ConvoySmoke >/dev/null; then return 0; fi
+  done
+  echo 'Could not verify ConvoySmoke in the first name field after one input retry.' >&2
+  return 1
+}
+
+submit_setup() {
+  local deadline=$((SECONDS + 15)) coordinates x y checked attempt
+  for attempt in 1 2 3; do
+    if ((SECONDS >= deadline)); then break; fi
+    dump_ui
+    if locate_ui setup_closed >/dev/null; then return 0; fi
+    locate_ui edit_text ConvoySmoke >/dev/null || {
+      echo 'The verified smoke name changed before Continue.' >&2; return 1;
+    }
+    coordinates="$(locate_ui positive Continue)" || {
+      echo 'The setup dialog has no enabled Continue button.' >&2; return 1;
+    }
+    read -r x y checked <<< "$coordinates"
+    adb shell input tap "$x" "$y"
+    sleep 1
+    dump_ui
+    if locate_ui setup_closed >/dev/null; then return 0; fi
+  done
+  echo 'Continue did not dismiss the verified trip setup dialog within 15 seconds.' >&2
+  return 1
 }
 
 assert_running() {
@@ -307,9 +355,7 @@ adb shell dumpsys package com.convoy.offline > build/smoke/package.txt
 adb shell cmd location set-location-enabled true
 setup_open=true
 tap_control text 'Start trip' 'Start trip button'
-tap_control edit '' 'name field'
-adb shell input keycombination 113 29 # Select any previously saved name (Ctrl+A).
-adb shell input text ConvoySmoke
+enter_smoke_name
 dismiss_keyboard
 hotspot="$(wait_control hotspot 'Create a local Wi-Fi hotspot when hosting' 'automatic hotspot checkbox' true)"
 read -r x y checked <<< "$hotspot"
@@ -317,7 +363,7 @@ if [[ "$checked" == true ]]; then adb shell input tap "$x" "$y"; fi
 hotspot="$(wait_control hotspot 'Create a local Wi-Fi hotspot when hosting' 'automatic hotspot checkbox' true)"
 read -r x y checked <<< "$hotspot"
 [[ "$checked" == false ]] || { echo 'Could not disable the automatic emulator hotspot.' >&2; exit 1; }
-tap_control positive Continue 'Continue button'
+submit_setup
 wait_service started
 keep_gps_fresh=true
 wait_control text 'End trip' 'active trip button' >/dev/null
