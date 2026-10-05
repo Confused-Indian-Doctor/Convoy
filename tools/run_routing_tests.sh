@@ -8,4 +8,4 @@ if ! command -v javac >/dev/null; then
 fi
 "${compiler[@]}" -encoding UTF-8 -d build/routing-test-classes \
   app/src/main/java/com/convoy/offline/OfflineRouter.java tests/OfflineRouterTest.java
-java -cp build/routing-test-classes com.convoy.offline.OfflineRouterTest "$@" | tee build/routing-tests.txt
+java -cp build/routing-test-classes com.convoy.offline.OfflineRouterTest "$@" 2>&1 | tee build/routing-tests.txt

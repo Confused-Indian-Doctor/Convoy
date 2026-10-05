@@ -1,4 +1,4 @@
-name: Build Convoy 0.4.0 unsigned
+name: Build and validate Convoy
 
 on:
   workflow_dispatch:
@@ -8,10 +8,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: convoy-build-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
 
@@ -33,87 +37,114 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0'
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+
+      - name: Run protocol and offline-data tests
+        run: |
+          bash tools/run_protocol_tests.sh
+          python3 -m unittest discover -s tests -p 'test_*.py' 2>&1 | tee build/region-tests.txt
+          python3 tools/run_pmtiles_validation_tests.py 2>&1 | tee build/pmtiles-validation-tests.txt
+
+      - name: Restore matching offline region
+        id: region-cache
+        uses: actions/cache@v4
+        with:
+          key: convoy-region-v040-${{ hashFiles('tools/fetch_shrewsbury_region.sh', 'tools/build_shrewsbury_region.py') }}
+          path: |
+            app/src/main/assets/shrewsbury.pmtiles
+            app/src/main/assets/overture-shrewsbury.pmtiles
+            app/src/main/assets/route.graph
+            app/src/main/assets/places.db
+            app/src/main/assets/fonts
+            app/src/main/assets/region-provenance.json
+            build/region-cache
 
       - name: Build Shrewsbury offline vector region
+        if: steps.region-cache.outputs.cache-hit != 'true'
+        run: bash tools/fetch_shrewsbury_region.sh
+
+      - name: Build, lint and verify APKs from checked-in source
+        run: |
+          bash tools/run_routing_tests.sh app/src/main/assets/route.graph
+          bash build-local.sh --skip-region --skip-tests
+          VERSION="$(sed -n "s/.*versionName '\([^']*\)'.*/\1/p" app/build.gradle)"
+          echo "CONVOY_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Sign release with the existing private Convoy identity
+        env:
+          CONVOY_KEYSTORE_BASE64: ${{ secrets.CONVOY_KEYSTORE_BASE64 }}
+          CONVOY_KEYSTORE_PASSWORD: ${{ secrets.CONVOY_KEYSTORE_PASSWORD }}
+          CONVOY_KEY_ALIAS: ${{ secrets.CONVOY_KEY_ALIAS }}
+          CONVOY_KEY_PASSWORD: ${{ secrets.CONVOY_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          ASSETS=app/src/main/assets
-          mkdir -p "$ASSETS" "build/tools"
+          if [[ -n "$CONVOY_KEYSTORE_BASE64" ]]; then
+            bash tools/sign_release.sh \
+              "build/release/Convoy-${CONVOY_VERSION}-aligned-unsigned.apk" \
+              "build/release/Convoy-${CONVOY_VERSION}.apk" | tee build/release/signing-verification.txt
+            echo 'CONVOY_RELEASE_SIGNED=true' >> "$GITHUB_ENV"
+          else
+            echo 'The release is unsigned. Configure the existing private Convoy signing secrets for an installable update.'
+          fi
 
-          curl -fL --retry 4 --retry-delay 3 \
-            'https://github.com/protomaps/go-pmtiles/releases/download/v1.31.2/go-pmtiles_1.31.2_Linux_x86_64.tar.gz' \
-            -o build/tools/pmtiles.tar.gz
-          tar -xzf build/tools/pmtiles.tar.gz -C build/tools
-          PMTILES="$(find build/tools -type f -name pmtiles | head -1)"
-          chmod +x "$PMTILES"
-
-          BBOX='-3.231321,52.418661,-2.276879,52.996939'
-          PLANET=''
-          for day in 20261004 20261003 20261002 20261001; do
-            url="https://build.protomaps.com/${day}.pmtiles"
-            if "$PMTILES" show "$url" >/dev/null 2>&1; then PLANET="$url"; break; fi
-          done
-          test -n "$PLANET"
-          echo "Using Protomaps basemap: $PLANET"
-          "$PMTILES" extract "$PLANET" "$ASSETS/shrewsbury.pmtiles" --bbox="$BBOX" --maxzoom=15
-          "$PMTILES" verify "$ASSETS/shrewsbury.pmtiles"
-
-          OVERTURE=''
-          for url in \
-            'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-09-23.1/places.pmtiles' \
-            'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-09-23.0/places.pmtiles' \
-            'https://overturemaps-tiles-us-west-2-beta.s3.amazonaws.com/2026-09-23/places.pmtiles'; do
-            if "$PMTILES" show "$url" >/dev/null 2>&1; then OVERTURE="$url"; break; fi
-          done
-          test -n "$OVERTURE"
-          echo "Using Overture places: $OVERTURE"
-          "$PMTILES" extract "$OVERTURE" "$ASSETS/overture-shrewsbury.pmtiles" --bbox="$BBOX" --maxzoom=16
-          # Overture regional extracts can retain a source MinZoom header that the verifier rejects even though the archive is readable.
-          "$PMTILES" show "$ASSETS/overture-shrewsbury.pmtiles" >/dev/null
-
-          mkdir -p "$ASSETS/fonts/Noto Sans Regular"
-          for range in 0-255 256-511; do
-            curl -fL --retry 4 --retry-delay 2 \
-              "https://raw.githubusercontent.com/protomaps/basemaps-assets/main/fonts/Noto%20Sans%20Regular/${range}.pbf" \
-              -o "$ASSETS/fonts/Noto Sans Regular/${range}.pbf"
-          done
-
-          python3 tools/build_shrewsbury_region.py "$ASSETS"
-          test -s "$ASSETS/route.graph"
-          test -s "$ASSETS/places.db"
-          ls -lh "$ASSETS" "$ASSETS/fonts/Noto Sans Regular"
-
-      - name: Build Android APK
-        run: |
-          set -euo pipefail
-          printf 'android.useAndroidX=true\nandroid.enableJetifier=true\norg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8\n' > gradle.properties
-          gradle --no-daemon --stacktrace :app:assembleRelease
-          BT="$ANDROID_SDK_ROOT/build-tools/35.0.0"
-          IN='app/build/outputs/apk/release/app-release-unsigned.apk'
-          test -f "$IN"
-          "$BT/zipalign" -f 4 "$IN" 'Convoy-0.4.0-aligned-unsigned.apk'
-          "$BT/zipalign" -c 4 'Convoy-0.4.0-aligned-unsigned.apk'
-          "$BT/aapt2" dump badging 'Convoy-0.4.0-aligned-unsigned.apk' | head -8 | tee build/apk-badging.txt
-          sha256sum 'Convoy-0.4.0-aligned-unsigned.apk' | tee build/unsigned.sha256
-          du -h 'Convoy-0.4.0-aligned-unsigned.apk'
-
-      - name: Run protocol tests
-        run: |
-          set -euo pipefail
-          mkdir -p build/test-classes
-          javac -encoding UTF-8 -d build/test-classes app/src/main/java/com/convoy/offline/Wire.java tests/WireTest.java
-          java -cp build/test-classes com.convoy.offline.WireTest | tee build/protocol-tests.txt
-
-      - name: Upload Convoy 0.4.0 unsigned
+      - name: Upload aligned unsigned release and validation
         uses: actions/upload-artifact@v4
         with:
-          name: Convoy-0.4.0-unsigned
+          name: Convoy-${{ env.CONVOY_VERSION }}-unsigned
           path: |
-            Convoy-0.4.0-aligned-unsigned.apk
+            build/release/Convoy-${{ env.CONVOY_VERSION }}-aligned-unsigned.apk
+            build/release/unsigned.sha256
+            build/release/apk-badging.txt
+            build/release/packaging-checks.txt
             build/protocol-tests.txt
-            build/unsigned.sha256
-            build/apk-badging.txt
+            build/routing-tests.txt
+            build/pmtiles-validation-tests.txt
+            build/region-tests.txt
+            build/android-build.txt
+            app/src/main/assets/region-provenance.json
+            app/build/reports/lint-results-release.*
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
 
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
 
+      - name: Install and launch offline on an Android 35 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: bash tools/emulator_smoke.sh
+
+      - name: Upload signed installable release
+        if: env.CONVOY_RELEASE_SIGNED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Convoy-${{ env.CONVOY_VERSION }}-installable-release
+          path: |
+            build/release/Convoy-${{ env.CONVOY_VERSION }}.apk
+            build/release/signing-verification.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload emulator evidence and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Convoy-${{ env.CONVOY_VERSION || 'build' }}-validation
+          path: |
+            build/smoke/
+            build/protocol-tests.txt
+            build/routing-tests.txt
+            build/pmtiles-validation-tests.txt
+            build/region-tests.txt
+            build/android-build.txt
+            app/build/reports/lint-results-release.*
+          if-no-files-found: warn
+          retention-days: 14
