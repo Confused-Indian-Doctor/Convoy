@@ -1409,7 +1409,9 @@ jobs:
           test -n "$OVERTURE"
           echo "Using Overture places: $OVERTURE"
           "$PMTILES" extract "$OVERTURE" "$ASSETS/overture-shrewsbury.pmtiles" --bbox="$BBOX" --maxzoom=16
+          # Overture regional extracts can retain a source MinZoom header that the verifier rejects even though the archive is readable.
           "$PMTILES" show "$ASSETS/overture-shrewsbury.pmtiles" >/dev/null
+
           mkdir -p "$ASSETS/fonts/Noto Sans Regular"
           for range in 0-255 256-511; do
             curl -fL --retry 4 --retry-delay 2 \
@@ -1426,6 +1428,7 @@ jobs:
         run: |
           set -euo pipefail
           cd v0.4.0
+          printf 'android.useAndroidX=true\nandroid.enableJetifier=true\norg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8\n' > gradle.properties
           gradle --no-daemon --stacktrace :app:assembleRelease
           BT="$ANDROID_SDK_ROOT/build-tools/35.0.0"
           IN='app/build/outputs/apk/release/app-release-unsigned.apk'
