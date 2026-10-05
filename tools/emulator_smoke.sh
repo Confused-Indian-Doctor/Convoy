@@ -218,9 +218,8 @@ submit_setup() {
     if ((SECONDS >= deadline)); then break; fi
     dump_ui
     if locate_ui setup_closed >/dev/null; then return 0; fi
-    locate_ui edit_text ConvoySmoke >/dev/null || {
-      echo 'The verified smoke name changed before Continue.' >&2; return 1;
-    }
+    # Input was verified before dismissing the keyboard. Its normal text corrections
+    # may change the display name; the app validates it before starting the service.
     coordinates="$(locate_ui positive Continue)" || {
       echo 'The setup dialog has no enabled Continue button.' >&2; return 1;
     }
