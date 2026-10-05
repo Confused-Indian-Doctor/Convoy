@@ -35,8 +35,50 @@ capture_diagnostics() {
 trap capture_diagnostics EXIT
 
 dump_ui() {
+  local coordinates x y
   adb shell uiautomator dump "$remote_ui" >/dev/null
   adb exec-out cat "$remote_ui" > "$private_dir/ui.xml"
+  coordinates="$(launcher_anr_close)" || return $?
+  if [[ -n "$coordinates" ]]; then
+    read -r x y <<< "$coordinates"
+    adb shell input tap "$x" "$y"
+    printf 'Dismissed Pixel Launcher ANR using android:id/aerr_close.\n' >> build/smoke/launcher-anr-dismissals.txt
+    sleep 1
+    adb shell uiautomator dump "$remote_ui" >/dev/null
+    adb exec-out cat "$remote_ui" > "$private_dir/ui.xml"
+    coordinates="$(launcher_anr_close)" || return $?
+    if [[ -n "$coordinates" ]]; then
+      echo 'Pixel Launcher ANR dialog remained after Close app.' >&2
+      return 1
+    fi
+  fi
+}
+
+launcher_anr_close() {
+  python3 - "$private_dir/ui.xml" <<'PYANR'
+import re
+import sys
+import xml.etree.ElementTree as ET
+
+nodes = list(ET.parse(sys.argv[1]).getroot().iter("node"))
+titles = [n.get("text", "").replace("’", "'") for n in nodes
+          if n.get("package") == "android" and n.get("resource-id") == "android:id/alertTitle"]
+if "Convoy isn't responding" in titles:
+    sys.exit("Convoy ANR dialog detected; refusing to dismiss it.")
+if "Pixel Launcher isn't responding" not in titles:
+    sys.exit(0)
+for node in nodes:
+    if (node.get("package") != "android" or node.get("resource-id") != "android:id/aerr_close"
+            or node.get("text", "").casefold() != "close app" or node.get("enabled") != "true"):
+        continue
+    bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+    if bounds:
+        left, top, right, bottom = map(int, bounds.groups())
+        if right > left and bottom > top:
+            print((left + right) // 2, (top + bottom) // 2)
+            sys.exit(0)
+sys.exit("Pixel Launcher ANR has no enabled Close app control.")
+PYANR
 }
 
 sanitize_setup_ui() {
@@ -256,8 +298,8 @@ adb shell am start -W -n com.convoy.offline/.MainActivity | tee build/smoke/laun
 sleep 20
 assert_running offline-startup
 cp build/smoke/process-offline-startup.txt build/smoke/process.txt
-adb exec-out screencap -p > build/smoke/offline-startup.png
 dump_ui
+adb exec-out screencap -p > build/smoke/offline-startup.png
 cp "$private_dir/ui.xml" build/smoke/ui.xml
 adb shell dumpsys package com.convoy.offline > build/smoke/package.txt
 
