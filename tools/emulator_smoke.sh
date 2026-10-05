@@ -132,7 +132,7 @@ for node in nodes:
         or (mode == "positive" and text.casefold() == value.casefold() and attrs.get("resource-id") == "android:id/button1")
         or (mode == "edit" and attrs.get("class") == "android.widget.EditText")
         or (mode == "edit_focused" and node is first_edit and attrs.get("focused") == "true")
-        or (mode == "edit_text" and node is first_edit and re.sub(r"\s+", "", text) == value)
+        or (mode == "edit_text" and node is first_edit and re.sub(r"\s+", "", text).casefold() == value.casefold())
         or (mode == "prefix" and text.startswith(value))
         or (mode == "hotspot" and attrs.get("class") == "android.widget.CheckBox" and text == value)
         or (mode == "gps" and text.startswith("GPS ·"))
