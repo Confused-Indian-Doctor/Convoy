@@ -1,4 +1,4 @@
-# Convoy 0.4.1
+# Convoy 0.4.2
 
 Convoy is an offline-first Android navigation and local convoy app. It uses MapLibre Native and open map data, retaining vector maps, heading-up driving, highlighted offline routes, ETA/distance, tappable places, nearby category searches, convoy markers, selectable JDM cars, speedometer, calibrated G-force/pitch/roll instruments, Wi-Fi/Bluetooth communication and PTT/VOX voice.
 
@@ -14,11 +14,11 @@ bash build-local.sh
 
 This fetches the offline region, runs protocol/offline-data tests, builds release and debug variants, runs Android release lint and checks the release APK contains populated map, routing and place assets plus MapLibre native libraries. Outputs are in `build/release/`. When the offline assets have already been generated, use `bash build-local.sh --skip-region`.
 
-The GitHub workflow is `.github/workflows/Convoy-0.4.0-build.yml` (the historical path is retained). It is configured to use the same Gradle source build, then install and launch the signed release when configured, or the separate debug test variant, on an Android 35 emulator with Wi-Fi/mobile data disabled. A completed successful run produces validation artifacts containing the installation result, startup screenshot, logs and lint report; review that run for actual build and device results. An unsigned release artifact is explicitly labeled `Convoy-0.4.1-unsigned`; an unsigned APK cannot be installed.
+The GitHub workflow is `.github/workflows/Convoy-0.4.0-build.yml` (the historical path is retained). It is configured to use the same Gradle source build, then install and launch the signed release when configured, or the separate debug test variant, on an Android 35 emulator with Wi-Fi/mobile data disabled. A completed successful run produces validation artifacts containing the installation result, startup screenshot, logs and lint report; review that run for actual build and device results. An unsigned release artifact is explicitly labeled `Convoy-0.4.2-unsigned`; an unsigned APK cannot be installed.
 
 ## Private release signing and updates
 
-The package remains `com.convoy.offline`, with version code `7` and version name `0.4.1`. Android permits an in-place update from previous Convoy versions only when the APK is signed with the same existing Convoy signing identity. Preserve that key and the app's installed data.
+The package remains `com.convoy.offline`, with version code `8` and version name `0.4.2`. Android permits an in-place update from previous Convoy versions only when the APK is signed with the same existing Convoy signing identity. Preserve that key and the app's installed data.
 
 Signing is optional at build time and uses only a supplied existing key. For a local release, provide `CONVOY_KEYSTORE_PATH` pointing outside the repository and these environment variables through a private credential manager:
 
@@ -28,7 +28,7 @@ Signing is optional at build time and uses only a supplied existing key. For a l
 
 Alternatively, provide the existing keystore through `CONVOY_KEYSTORE_BASE64`. For GitHub Actions, configure that value and the three variables above as repository/environment secrets. The workflow decodes the key into a temporary private directory and removes it after signing. Passwords reach `apksigner` through its environment interface. The public source contains no signing key or password, and no new release identity is generated.
 
-With signing configured, the build produces `build/release/Convoy-0.4.1.apk` and verifies its certificate, APK signature and alignment. Actions publishes it as `Convoy-0.4.1-installable-release`. The emulator's debug key is solely for smoke testing and cannot update an existing release installation. If private release signing is unavailable, Actions keeps the install-tested variant in a clearly labeled `Convoy-0.4.1-debug-test-apk` artifact; this is separate from the unsigned release and the existing Convoy release identity.
+With signing configured, the build produces `build/release/Convoy-0.4.2.apk` and verifies its certificate, APK signature and alignment. Actions publishes it as `Convoy-0.4.2-installable-release`. The emulator's debug key is solely for smoke testing and cannot update an existing release installation. If private release signing is unavailable, Actions keeps the install-tested variant in a clearly labeled `Convoy-0.4.2-debug-test-apk` artifact; this is separate from the unsigned release and the existing Convoy release identity.
 
 ## Offline Shrewsbury region
 

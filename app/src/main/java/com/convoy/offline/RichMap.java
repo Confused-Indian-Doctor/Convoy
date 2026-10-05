@@ -84,7 +84,15 @@ public final class RichMap extends FrameLayout {
  private String escapeJson(String s){return s.replace("\\","\\\\").replace("\"","\\\"");}
  private void addCarImages(Style s){
   int[] res={R.drawable.car_nc,R.drawable.car_gt86,R.drawable.car_r34,R.drawable.car_supra,R.drawable.car_nsx,R.drawable.car_gc8,R.drawable.car_evo6,R.drawable.car_ae86,R.drawable.car_350z,R.drawable.car_na,R.drawable.car_generic};
-  for(int i=0;i<CAR_KEYS.length;i++){Bitmap b=BitmapFactory.decodeResource(getResources(),res[i]);if(b!=null)s.addImage("car-"+CAR_KEYS[i],b);}
+  for(int i=0;i<CAR_KEYS.length;i++){
+   Bitmap b=BitmapFactory.decodeResource(getResources(),res[i]);
+   if(b!=null){
+    // MapLibre derives the sprite pixel ratio from Bitmap density. These nodpi
+    // cars use 128 logical pixels, independent of the phone's display density.
+    b.setDensity(android.util.DisplayMetrics.DENSITY_DEFAULT);
+    s.addImage("car-"+CAR_KEYS[i],b);
+   }
+  }
  }
  public void refresh(){if(disposed)return;updateDynamic();maybeRoute();refreshCamera(false);updateNavigationProgress();}
  private void updateDynamic(){if(style==null)return;try{
