@@ -129,6 +129,7 @@ for node in nodes:
     text = attrs.get("text", "")
     matches = (
         (mode == "text" and text == value)
+        or (mode == "title" and text == value and attrs.get("resource-id") == "android:id/alertTitle")
         or (mode == "positive" and text.casefold() == value.casefold() and attrs.get("resource-id") == "android:id/button1")
         or (mode == "edit" and attrs.get("class") == "android.widget.EditText")
         or (mode == "edit_focused" and node is first_edit and attrs.get("focused") == "true")
@@ -184,10 +185,16 @@ wait_control() {
 }
 
 dismiss_keyboard() {
-  adb shell dumpsys input_method > "$private_dir/input-method.txt"
-  if rg -q 'mInputShown=true|mIsInputViewShown=true|isInputViewShown=true' "$private_dir/input-method.txt"; then
-    adb shell input keyevent 4 # Dismiss a visible keyboard while keeping the dialog.
-  fi
+  local title=$1
+  # Called only after tapping and typing into a known EditText. One Back closes
+  # its keyboard; do not depend on version-specific dumpsys field formatting.
+  adb shell input keyevent 4
+  sleep 1
+  dump_ui
+  locate_ui title "$title" >/dev/null || {
+    printf 'Input dialog "%s" closed while dismissing its keyboard.\n' "$title" >&2
+    return 1
+  }
 }
 
 tap_control() {
@@ -355,7 +362,7 @@ adb shell cmd location set-location-enabled true
 setup_open=true
 tap_control text 'Start trip' 'Start trip button'
 enter_smoke_name
-dismiss_keyboard
+dismiss_keyboard 'Bring your crew together'
 hotspot="$(wait_control hotspot 'Create a local Wi-Fi hotspot when hosting' 'automatic hotspot checkbox' true)"
 read -r x y checked <<< "$hotspot"
 if [[ "$checked" == true ]]; then adb shell input tap "$x" "$y"; fi
@@ -383,7 +390,7 @@ cp "$private_dir/ui.xml" build/smoke/live-gps-ui.xml
 tap_control text 'Search offline places' 'offline place search button'
 tap_control edit '' 'offline search field'
 adb shell input text Shrewsbury%sCastle
-dismiss_keyboard
+dismiss_keyboard 'Search offline places'
 tap_control positive Search 'offline Search button'
 tap_control prefix 'Shrewsbury Castle' 'Shrewsbury Castle offline search result'
 tap_control text 'Navigate here' 'Navigate here button' true
