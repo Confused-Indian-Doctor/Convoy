@@ -2,6 +2,12 @@
 # Run inside a booted API 35 x86_64 emulator. Prefer a privately signed release when available.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+for dependency in adb python3 grep timeout; do
+  command -v "$dependency" >/dev/null || {
+    printf 'Required smoke dependency is missing: %s\n' "$dependency" >&2
+    exit 1
+  }
+done
 mkdir -p build/smoke
 private_dir="$(mktemp -d "${TMPDIR:-/tmp}/convoy-smoke.XXXXXX")"
 remote_ui="/sdcard/convoy-smoke-$$.xml"
@@ -34,18 +40,46 @@ capture_diagnostics() {
 }
 trap capture_diagnostics EXIT
 
+capture_ui() {
+  rm -f "$private_dir/ui.xml" "$private_dir/ui-next.xml"
+  adb shell rm -f "$remote_ui" >/dev/null || return 1
+  if ! timeout 15 adb shell uiautomator dump "$remote_ui" > "$private_dir/uiautomator-output.txt" 2>&1; then
+    echo 'uiautomator did not complete a fresh UI capture within 15 seconds.' >&2
+    return 1
+  fi
+  if grep -Eiq 'ERROR:|could not get idle state' "$private_dir/uiautomator-output.txt"; then
+    echo 'uiautomator reported an error instead of a fresh UI hierarchy.' >&2
+    return 1
+  fi
+  if ! adb exec-out cat "$remote_ui" > "$private_dir/ui-next.xml" 2> "$private_dir/ui-read-error.txt" || [[ ! -s "$private_dir/ui-next.xml" ]]; then
+    echo 'uiautomator did not produce a fresh, nonempty UI hierarchy.' >&2
+    return 1
+  fi
+  python3 - "$private_dir/ui-next.xml" <<'PYFRESH'
+import sys
+import xml.etree.ElementTree as ET
+
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except (OSError, ET.ParseError):
+    sys.exit("The fresh UI hierarchy was not valid XML.")
+if root.tag != "hierarchy" or not list(root.iter("node")):
+    sys.exit("The fresh UI hierarchy contained no accessible nodes.")
+PYFRESH
+  [[ $? == 0 ]] || return 1
+  mv "$private_dir/ui-next.xml" "$private_dir/ui.xml"
+}
+
 dump_ui() {
   local coordinates x y
-  adb shell uiautomator dump "$remote_ui" >/dev/null
-  adb exec-out cat "$remote_ui" > "$private_dir/ui.xml"
+  capture_ui || return 1
   coordinates="$(launcher_anr_close)" || return $?
   if [[ -n "$coordinates" ]]; then
     read -r x y <<< "$coordinates"
     adb shell input tap "$x" "$y"
     printf 'Dismissed Pixel Launcher ANR using android:id/aerr_close.\n' >> build/smoke/launcher-anr-dismissals.txt
     sleep 1
-    adb shell uiautomator dump "$remote_ui" >/dev/null
-    adb exec-out cat "$remote_ui" > "$private_dir/ui.xml"
+    capture_ui || return 1
     coordinates="$(launcher_anr_close)" || return $?
     if [[ -n "$coordinates" ]]; then
       echo 'Pixel Launcher ANR dialog remained after Close app.' >&2
@@ -247,17 +281,17 @@ assert_running() {
     return 1
   fi
   adb logcat -d > build/smoke/logcat.txt
-  if rg -q 'ANR in com.convoy.offline' build/smoke/logcat.txt; then
+  if grep -Eq 'ANR in com.convoy.offline' build/smoke/logcat.txt; then
     printf 'Convoy ANR detected during %s.\n' "$phase" >&2
     return 1
   fi
   read -r convoy_pid _ < "build/smoke/process-${phase}.txt"
   adb logcat -d --pid="$convoy_pid" > build/smoke/convoy-logcat.txt
-  if rg -q 'FATAL EXCEPTION|Fatal signal' build/smoke/convoy-logcat.txt; then
+  if grep -Eq 'FATAL EXCEPTION|Fatal signal' build/smoke/convoy-logcat.txt; then
     printf 'Convoy crash detected during %s.\n' "$phase" >&2
     return 1
   fi
-  if rg -q 'Mbgl.*\[Style\]: Failed to load source (basemap|overture):' build/smoke/convoy-logcat.txt; then
+  if grep -Eq 'Mbgl.*\[Style\]: Failed to load source (basemap|overture):' build/smoke/convoy-logcat.txt; then
     printf 'Convoy offline map source failed during %s; see convoy-logcat.txt.\n' "$phase" >&2
     return 1
   fi
@@ -287,7 +321,7 @@ verify_offline_network() {
       printf 'External IPv%s connectivity remained available during %s.\n' "$family" "$phase" >&2
       return 1
     fi
-    if rg -qi 'not found|invalid option|unknown option|usage:' "$probe"; then
+    if grep -Eiq 'not found|invalid option|unknown option|usage:' "$probe"; then
       printf 'Could not execute the external IPv%s connectivity probe; see %s.\n' "$family" "$probe" >&2
       return 1
     fi
@@ -325,11 +359,11 @@ wait_service() {
     refresh_gps
     adb shell dumpsys activity services com.convoy.offline > "$private_dir/services.txt"
     present=false
-    if rg -q 'ServiceRecord\{[^}]*com\.convoy\.offline/\.ConvoyService' "$private_dir/services.txt"; then
+    if grep -Eq 'ServiceRecord\{[^}]*com\.convoy\.offline/\.ConvoyService' "$private_dir/services.txt"; then
       present=true
     fi
     if [[ "$expected" == stopped && "$present" == false ]]; then return 0; fi
-    if [[ "$expected" == started && "$present" == true ]] && rg -q 'isForeground=true' "$private_dir/services.txt"; then return 0; fi
+    if [[ "$expected" == started && "$present" == true ]] && grep -Eq 'isForeground=true' "$private_dir/services.txt"; then return 0; fi
     sleep 1
   done
   printf 'Convoy foreground service did not reach state "%s" within 15 seconds.\n' "$expected" >&2

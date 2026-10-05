@@ -34,8 +34,10 @@ public class MainActivity extends Activity {
  private TextView status,detail,gps,voice,crewSummary,navPrimary,navSecondary,routeSummary,routeTitle;
  private Button trip,ptt,vox,routeAction,instrumentButton;
  private final ArrayList<Button> tabButtons=new ArrayList<>();
+ private ArrayList<String> crewSnapshot=new ArrayList<>();
+ private ConvoyService crewSnapshotService;
  private final Handler handler=new Handler(Looper.getMainLooper());
- private int tab=0,mapLayoutSignature=-1;
+ private int tab=0,mapLayoutSignature=-1,directionResource=0;
  private Runnable permissionAction;
  private boolean importing=false,hadTrip=false,compactMap=false,showInstruments=false,pttTouchClick=false,pttPhysicalDown=false;
 
@@ -46,6 +48,12 @@ public class MainActivity extends Activity {
  private TextView text(String value,int size,int color){
   TextView t=new TextView(this);t.setText(value);t.setTextColor(color);t.setTextSize(size);
   t.setPadding(0,dp(2),0,dp(2));return t;
+ }
+ private void updateText(TextView view,CharSequence value){
+  if(!TextUtils.equals(view.getText(),value))view.setText(value);
+ }
+ private void updateDescription(View view,CharSequence value){
+  if(!TextUtils.equals(view.getContentDescription(),value))view.setContentDescription(value);
  }
  private Button button(String label,boolean primary){
   Button b=new Button(this);b.setText(label);b.setContentDescription(label);b.setTextSize(13);
@@ -307,7 +315,7 @@ public class MainActivity extends Activity {
   if(tab==0){body.addView(mapPanel,new LinearLayout.LayoutParams(-1,-1));return;}
   ScrollView scroll=new ScrollView(this);LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(18),dp(18),dp(18),dp(16));scroll.addView(box);body.addView(scroll,new LinearLayout.LayoutParams(-1,-1));
   if(tab==1){crewPanel=null;renderPlan(box);return;}
-  if(tab==2){crewPanel=box;updateCrew();return;}
+  if(tab==2){crewPanel=box;crewSnapshot.clear();crewSnapshotService=null;updateCrew();return;}
   crewPanel=null;
   addSection(box,"Before you leave","Install the same APK on every phone. Allow precise Location, Microphone and Nearby devices. Turn Location and your selected radio on. Everyone uses the same group key.");
   addSection(box,"Trip plan & POIs","Use Plan to save fuel, food, rest, viewpoint, meet-up, hazard and custom stops. Planned stops are stored on this phone and appear on the map. The thin dashed line shows your stop sequence; a thick blue line shows the calculated offline driving route to your next unvisited stop. Share a plan before departure and paste/import it on the other phones.");
@@ -321,38 +329,63 @@ public class MainActivity extends Activity {
   addSection(box,"Map information",map.mapName+"\n"+map.attribution+"\n\nConvoy 0.4.1 • offline navigation");
  }
  private void addSection(LinearLayout box,String title,String value){TextView h=text(title,17,TEXT);h.setTypeface(null,Typeface.BOLD);box.addView(h);TextView t=text(value,14,MUTED);t.setLineSpacing(dp(3),1);spaced(box,t,-2);}
- private void updateCrew(){if(tab!=2||crewPanel==null)return;crewPanel.removeAllViews();ConvoyService s=ConvoyService.current;if(s==null){addSection(crewPanel,"Your crew appears here","Start or join a trip to share positions.");return;}addSection(crewPanel,s.myName+" • you",(s.host?"Host":"Member")+" · "+(s.bluetooth?"Bluetooth":"Wi-Fi")+" · "+s.connectionCount()+" direct link(s)");
- if(s.host&&!s.bluetooth){addSection(crewPanel,"Wi-Fi details",(s.hotspotInfo.isEmpty()?"Using existing Wi-Fi / hotspot":s.hotspotInfo)+"\n\nHost IP addresses:\n"+s.addresses()+"\n\nUse the address belonging to the hotspot / Wi-Fi interface.");}
- ArrayList<ConvoyService.Member> list=new ArrayList<>(s.members.values());list.sort(Comparator.comparing(m->m.name));for(ConvoyService.Member m:list){long seen=Math.max(0,(SystemClock.elapsedRealtime()-m.received)/1000);String line=(seen<=10?"Link recently heard":"Link not heard")+" · "+seen+"s ago\n";if(m.located){line+=(m.age()>15000?"STALE GPS":"Fresh GPS")+" · "+m.age()/1000+"s old · ±"+Math.round(m.accuracy)+" m\n"+String.format(Locale.US,"%.5f, %.5f",m.lat,m.lon);if(s.fix!=null){float[] distance=new float[1];android.location.Location.distanceBetween(s.fix.getLatitude(),s.fix.getLongitude(),m.lat,m.lon,distance);line+="\nLast-position distance: "+(distance[0]<1000?Math.round(distance[0])+" m":String.format(Locale.US,"%.1f km",distance[0]/1000));}}else line+="Waiting for this phone's GPS fix";addSection(crewPanel,m.name,line);}
- if(list.isEmpty())addSection(crewPanel,"Waiting for friends","Keep the app open on each phone while connecting.");Button mute=button(s.muted?"Unmute received voice":"Mute received voice",false);crewPanel.addView(mute);mute.setOnClickListener(v->s.muted=!s.muted);}
+ private void updateCrew(){
+  if(tab!=2||crewPanel==null)return;
+  ConvoyService s=ConvoyService.current;ArrayList<String> rows=new ArrayList<>();String muteLabel=null;
+  if(s==null){
+   rows.add("Your crew appears here");rows.add("Start or join a trip to share positions.");
+  }else{
+   rows.add(s.myName+" • you");rows.add((s.host?"Host":"Member")+" · "+(s.bluetooth?"Bluetooth":"Wi-Fi")+" · "+s.connectionCount()+" direct link(s)");
+   if(s.host&&!s.bluetooth){rows.add("Wi-Fi details");rows.add((s.hotspotInfo.isEmpty()?"Using existing Wi-Fi / hotspot":s.hotspotInfo)+"\n\nHost IP addresses:\n"+s.addresses()+"\n\nUse the address belonging to the hotspot / Wi-Fi interface.");}
+   ArrayList<ConvoyService.Member> list=new ArrayList<>(s.members.values());list.sort(Comparator.comparing(m->m.name));
+   for(ConvoyService.Member m:list){
+    long seen=Math.max(0,(SystemClock.elapsedRealtime()-m.received)/1000);
+    String line=(seen<=10?"Link recently heard":"Link not heard")+" · "+(seen/5*5)+"s+ ago\n";
+    if(m.located){
+     long age=m.age();line+=(age>15000?"STALE GPS":"Fresh GPS")+" · "+(age/5000*5)+"s+ old · ±"+Math.round(m.accuracy)+" m\n"+String.format(Locale.US,"%.5f, %.5f",m.lat,m.lon);
+     if(s.fix!=null){float[] distance=new float[1];android.location.Location.distanceBetween(s.fix.getLatitude(),s.fix.getLongitude(),m.lat,m.lon,distance);line+="\nLast-position distance: "+(distance[0]<1000?Math.round(distance[0])+" m":String.format(Locale.US,"%.1f km",distance[0]/1000));}
+    }else line+="Waiting for this phone's GPS fix";
+    rows.add(m.name);rows.add(line);
+   }
+   if(list.isEmpty()){rows.add("Waiting for friends");rows.add("Keep the app open on each phone while connecting.");}
+   muteLabel=s.muted?"Unmute received voice":"Mute received voice";
+  }
+  ArrayList<String> next=new ArrayList<>(rows);next.add(muteLabel);
+  if(crewSnapshotService==s&&crewSnapshot.equals(next))return;
+  crewSnapshotService=s;crewSnapshot=next;crewPanel.removeAllViews();
+  for(int i=0;i<rows.size();i+=2)addSection(crewPanel,rows.get(i),rows.get(i+1));
+  if(s!=null){Button mute=button(muteLabel,false);crewPanel.addView(mute);mute.setOnClickListener(v->s.muted=!s.muted);}
+ }
  private final Runnable tick=new Runnable(){public void run(){
+  // Dialogs have their own focused window. Do not invalidate the covered activity
+  // or emit duplicate accessibility changes while the user is completing a form.
+  if(!hasWindowFocus()){handler.postDelayed(this,1000);return;}
   ConvoyService s=ConvoyService.current;boolean running=s!=null&&s.active;
   if(running){
-   hadTrip=true;getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);trip.setText("End trip");
-   status.setText(s.status);detail.setText(s.detail.isEmpty()?"Group ready · share your key privately":s.detail);
-   voice.setText(s.muted?"Received voice muted":s.voiceStatus());vox.setText(s.vox?"Hands-free\non":"Hands-free\noff");
-   vox.setContentDescription(s.vox?"Hands-free voice enabled. Tap to disable":"Enable hands-free voice");
-   if(s.fix==null)gps.setText("Waiting for GPS");
+   hadTrip=true;if((getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)==0)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);updateText(trip,"End trip");
+   updateText(status,s.status);updateText(detail,s.detail.isEmpty()?"Group ready · share your key privately":s.detail);
+   updateText(voice,!s.ptt&&s.connectionCount()==0?"Local voice · waiting for crew":s.muted?"Received voice muted":s.voiceStatus());updateText(vox,s.vox?"Hands-free\non":"Hands-free\noff");
+   updateDescription(vox,s.vox?"Hands-free voice enabled. Tap to disable":"Enable hands-free voice");
+   if(s.fix==null)updateText(gps,"Waiting for GPS");
    else{
     long age=(SystemClock.elapsedRealtimeNanos()-s.fix.getElapsedRealtimeNanos())/1000000;
-    gps.setText((age>15000?"Stale GPS":"GPS")+" · ±"+Math.round(s.fix.getAccuracy())+" m · "+age/1000+"s");
+    updateText(gps,(age>15000?"Stale GPS":"GPS")+" · ±"+Math.round(s.fix.getAccuracy())+" m"+(age>15000?" · "+(age/5000*5)+"s+":""));
    }
    long fresh=s.members.values().stream().filter(m->m.age()<=15000).count();
-   crewSummary.setText(fresh+" crew · "+s.connectionCount()+" link(s)");
+   updateText(crewSummary,fresh+" crew · "+s.connectionCount()+" link(s)");
   }else{
-   getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);trip.setText("Start trip");
-   status.setText(hadTrip?"Trip ended · map stays offline":"Offline. Together.");
-   detail.setText("No mobile signal needed. Set up together before driving.");
-   voice.setText("Local voice · start a trip");gps.setText("GPS starts with a trip");
-   crewSummary.setText("Offline map");vox.setText("Hands-free\noff");vox.setContentDescription("Set up a trip to enable hands-free voice");
+   if((getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)!=0)getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);updateText(trip,"Start trip");
+   updateText(status,hadTrip?"Trip ended · map stays offline":"Offline. Together.");
+   updateText(detail,"No mobile signal needed. Set up together before driving.");
+   updateText(voice,"Local voice · start a trip");updateText(gps,"GPS starts with a trip");
+   updateText(crewSummary,"Offline map");updateText(vox,"Hands-free\noff");updateDescription(vox,"Set up a trip to enable hands-free voice");
   }
-  trip.setContentDescription(running?"End this convoy trip":"Start or join a convoy trip");
-  connectionBranding.setContentDescription("Convoy. "+status.getText()+". Tap for trip and connection details.");
+  updateDescription(trip,running?"End this convoy trip":"Start or join a convoy trip");
+  updateDescription(connectionBranding,"Convoy. "+status.getText()+". Tap for trip and connection details.");
   ptt.setEnabled(running&&s.connectionCount()>0);
   if(!ptt.isEnabled()&&s!=null)s.ptt=false;
-  ptt.setText(running&&s.ptt?(pttPhysicalDown?"Release to listen":"Tap to finish talking"):"Hold to talk");
-  ptt.setContentDescription(running&&s.ptt?"Talking. Release or click to stop transmitting":"Hold to transmit voice. Accessibility click toggles talking on or off.");
-  if(running&&!s.ptt&&s.connectionCount()==0)voice.setText("Local voice · waiting for crew");
+  updateText(ptt,running&&s.ptt?(pttPhysicalDown?"Release to listen":"Tap to finish talking"):"Hold to talk");
+  updateDescription(ptt,running&&s.ptt?"Talking. Release or click to stop transmitting":"Hold to transmit voice. Accessibility click toggles talking on or off.");
   map.refresh();updateNavigationBanner();updateCrew();handler.postDelayed(this,1000);
  }};
  private void updateNavigationBanner(){
@@ -360,29 +393,30 @@ public class MainActivity extends Activity {
   String target=map.getTargetName(),instruction=map.getInstruction();float metres=map.getDistanceRemaining();int eta=map.getEtaSeconds();
   boolean routing=target!=null&&!target.isEmpty();
   navigationBanner.setVisibility(routing?View.VISIBLE:View.GONE);
-  routeAction.setText(map.hasManualTarget()?"Stop":"Plan");
-  routeAction.setContentDescription(map.hasManualTarget()?"Stop navigating to this place":"Open your trip plan");
+  updateText(routeAction,map.hasManualTarget()?"Stop":"Plan");
+  updateDescription(routeAction,map.hasManualTarget()?"Stop navigating to this place":"Open your trip plan");
   if(!routing){
-   routeTitle.setText("Ready for the road");routeSummary.setText("Choose a place or plan your next stop");
+   updateText(routeTitle,"Ready for the road");updateText(routeSummary,"Choose a place or plan your next stop");
    applyMapLayout();return;
   }
   if(instruction==null||instruction.isEmpty())instruction=map.routingReady()?"Calculating offline route…":"Preparing offline routing…";
   float turnDistance=map.getManeuverDistance();
   String cue=(turnDistance>0?formatMiles(turnDistance)+" · ":"")+"to "+target;
-  navPrimary.setText(cue);navPrimary.setContentDescription(cue);
+  updateText(navPrimary,cue);updateDescription(navPrimary,cue);
   String turn=instruction.toLowerCase(Locale.ROOT);
-  directionIcon.setImageResource(turn.startsWith("turn left")?R.drawable.ic_turn_left:
+  int nextDirection=turn.startsWith("turn left")?R.drawable.ic_turn_left:
           turn.startsWith("turn right")?R.drawable.ic_turn_right:
           turn.contains("u-turn")?R.drawable.ic_u_turn:
-          turn.contains("arriv")?R.drawable.ic_location:R.drawable.ic_direction);
-  navSecondary.setText(instruction);navSecondary.setContentDescription(instruction);
+          turn.contains("arriv")?R.drawable.ic_location:R.drawable.ic_direction;
+  if(directionResource!=nextDirection){directionResource=nextDirection;directionIcon.setImageResource(nextDirection);}
+  updateText(navSecondary,instruction);updateDescription(navSecondary,instruction);
   if(metres>=0){
-   routeTitle.setText(metres==0?"Arrived":eta>0?formatEta(eta):formatMiles(metres));
-   routeSummary.setText(formatMiles(metres)+(eta>0?" · arrive "+clockEta(eta):"")+" · "+target);
+   updateText(routeTitle,metres==0?"Arrived":eta>0?formatEta(eta):formatMiles(metres));
+   updateText(routeSummary,formatMiles(metres)+(eta>0?" · arrive "+clockEta(eta):"")+" · "+target);
   }else{
-   routeTitle.setText(target);routeSummary.setText(instruction);
+   updateText(routeTitle,target);updateText(routeSummary,instruction);
   }
-  routeSummary.setContentDescription(routeSummary.getText());applyMapLayout();
+  updateDescription(routeSummary,routeSummary.getText());applyMapLayout();
  }
  private String formatMiles(float metres){if(metres<=0)return "0 m";if(metres<161)return Math.max(10,Math.round(metres/10f)*10)+" m";if(metres<1609)return Math.round(metres*1.09361f)+" yd";return String.format(Locale.UK,"%.1f mi",metres/1609.344f);}
  private String formatEta(int seconds){int m=Math.max(1,(int)Math.ceil(seconds/60.0));return m<60?m+" min":(m/60)+" h "+(m%60)+" min";}
