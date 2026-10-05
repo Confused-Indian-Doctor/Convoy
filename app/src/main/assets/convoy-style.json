@@ -9,7 +9,8 @@
     "trip": {"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
     "waypoints": {"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
     "crew": {"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
-    "own": {"type":"geojson","data":{"type":"FeatureCollection","features":[]}}
+    "own": {"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
+    "destination": {"type":"geojson","data":{"type":"FeatureCollection","features":[]}}
   },
   "layers": [
     {"id":"background","type":"background","paint":{"background-color":"#f7f5f0"}},
@@ -44,10 +45,12 @@
     {"id":"overture-place-label","type":"symbol","source":"overture","source-layer":"place","minzoom":16.5,"filter":["has","@name"],"layout":{"text-field":["get","@name"],"text-font":["Noto Sans Regular"],"text-size":9,"text-offset":[0,0.9],"text-anchor":"top"},"paint":{"text-color":"#4d5a60","text-halo-color":"#ffffff","text-halo-width":1.3}},
 
     {"id":"trip-line","type":"line","source":"trip","paint":{"line-color":"#7d8b92","line-width":2.0,"line-dasharray":[2,2],"line-opacity":0.75}},
-    {"id":"route-casing","type":"line","source":"route","paint":{"line-color":"#ffffff","line-width":["interpolate",["linear"],["zoom"],10,6,16,13],"line-opacity":0.9}},
-    {"id":"route-line","type":"line","source":"route","paint":{"line-color":"#1677ff","line-width":["interpolate",["linear"],["zoom"],10,4,16,9],"line-opacity":0.95}},
+    {"id":"route-casing","type":"line","source":"route","layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":"#ffffff","line-width":["interpolate",["linear"],["zoom"],10,6,16,13],"line-opacity":0.9}},
+    {"id":"route-line","type":"line","source":"route","layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":"#1677ff","line-width":["interpolate",["linear"],["zoom"],10,4,16,9],"line-opacity":0.95}},
     {"id":"waypoint-dot","type":"circle","source":"waypoints","paint":{"circle-radius":8,"circle-color":"#006e4a","circle-stroke-color":"#ffffff","circle-stroke-width":2}},
     {"id":"waypoint-label","type":"symbol","source":"waypoints","layout":{"text-field":["get","label"],"text-font":["Noto Sans Regular"],"text-size":11,"text-offset":[0,1.3],"text-anchor":"top"},"paint":{"text-color":"#0e4435","text-halo-color":"#ffffff","text-halo-width":2}},
+    {"id":"destination-dot","type":"circle","source":"destination","paint":{"circle-radius":10,"circle-color":"#e84855","circle-stroke-color":"#ffffff","circle-stroke-width":3}},
+    {"id":"destination-label","type":"symbol","source":"destination","layout":{"text-field":["get","name"],"text-font":["Noto Sans Regular"],"text-size":12,"text-offset":[0,1.5],"text-anchor":"top","text-max-width":14},"paint":{"text-color":"#9f2636","text-halo-color":"#ffffff","text-halo-width":2}},
     {"id":"crew-cars","type":"symbol","source":"crew","layout":{"icon-image":["get","icon"],"icon-size":0.22,"icon-allow-overlap":true,"text-field":["get","name"],"text-font":["Noto Sans Regular"],"text-size":10,"text-offset":[0,2.4],"text-anchor":"top","text-allow-overlap":true},"paint":{"text-color":"#10212b","text-halo-color":"#ffffff","text-halo-width":2}},
     {"id":"own-car","type":"symbol","source":"own","layout":{"icon-image":["get","icon"],"icon-size":0.26,"icon-allow-overlap":true,"icon-rotation-alignment":"map","icon-rotate":["get","bearing"],"text-field":"You","text-font":["Noto Sans Regular"],"text-size":10,"text-offset":[0,2.6],"text-anchor":"top","text-allow-overlap":true},"paint":{"text-color":"#006e4a","text-halo-color":"#ffffff","text-halo-width":2}}
   ]

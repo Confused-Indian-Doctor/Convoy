@@ -23,6 +23,15 @@ public class DrivingInstruments extends View implements SensorEventListener {
     private float linearX, linearY;
     private float gLateral, gLongitudinal;
     private float rawPitch, rawRoll, zeroPitch, zeroRoll;
+    private boolean attached, sensorsRegistered;
+    private int sensorRotation = -1;
+    private final Runnable refresh = new Runnable() {
+        @Override public void run() {
+            if (!attached || !isShown() || getWindowVisibility() != VISIBLE) return;
+            invalidate();
+            postDelayed(this, 250);
+        }
+    };
 
     public DrivingInstruments(Context c) {
         super(c);
@@ -34,39 +43,80 @@ public class DrivingInstruments extends View implements SensorEventListener {
             accel = sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
             usingLinear = linear != null;
         }
+        SharedPreferences calibration = c.getSharedPreferences("driving-instruments", Context.MODE_PRIVATE);
+        zeroPitch = calibration.getFloat("zero-pitch-0", 0f);
+        zeroRoll = calibration.getFloat("zero-roll-0", 0f);
+        setContentDescription("GPS speed, G-force, pitch and roll. Tap the tilt gauge to calibrate the mounted phone.");
+        setClickable(true);
         setLayerType(View.LAYER_TYPE_SOFTWARE, null);
     }
 
     @Override protected void onAttachedToWindow() {
         super.onAttachedToWindow();
-        if (sensors != null) {
-            if (linear != null) sensors.registerListener(this, linear, SensorManager.SENSOR_DELAY_GAME);
-            if (accel != null) sensors.registerListener(this, accel, SensorManager.SENSOR_DELAY_GAME);
-        }
+        attached = true;
+        updateSensors();
     }
 
     @Override protected void onDetachedFromWindow() {
-        if (sensors != null) sensors.unregisterListener(this);
+        attached = false;
+        updateSensors();
         super.onDetachedFromWindow();
+    }
+
+    @Override protected void onWindowVisibilityChanged(int visibility) {
+        super.onWindowVisibilityChanged(visibility);
+        updateSensors();
+    }
+
+    @Override public void onVisibilityAggregated(boolean visible) {
+        super.onVisibilityAggregated(visible);
+        updateSensors();
+    }
+
+    private void updateSensors() {
+        boolean visible = attached && isShown() && getWindowVisibility() == VISIBLE;
+        if (sensors != null && visible != sensorsRegistered) {
+            if (visible) {
+                if (linear != null) sensors.registerListener(this, linear, SensorManager.SENSOR_DELAY_GAME);
+                if (accel != null) sensors.registerListener(this, accel, SensorManager.SENSOR_DELAY_GAME);
+            } else sensors.unregisterListener(this);
+            sensorsRegistered = visible;
+        }
+        removeCallbacks(refresh);
+        if (visible) post(refresh);
     }
 
     @Override public void onAccuracyChanged(Sensor sensor, int accuracy) {}
 
     @Override public void onSensorChanged(SensorEvent e) {
+        // Sensors use the phone's natural orientation; gauges use its current screen axes.
+        float x = e.values[0], y = e.values[1];
+        int rotation = getDisplay() == null ? Surface.ROTATION_0 : getDisplay().getRotation();
+        if (rotation == Surface.ROTATION_90) { x = -e.values[1]; y = e.values[0]; }
+        else if (rotation == Surface.ROTATION_180) { x = -e.values[0]; y = -e.values[1]; }
+        else if (rotation == Surface.ROTATION_270) { x = e.values[1]; y = -e.values[0]; }
+        if (sensorRotation != rotation) {
+            sensorRotation = rotation;
+            SharedPreferences calibration = getContext().getSharedPreferences("driving-instruments", Context.MODE_PRIVATE);
+            zeroPitch = calibration.getFloat("zero-pitch-" + rotation, 0f);
+            zeroRoll = calibration.getFloat("zero-roll-" + rotation, 0f);
+            if (e.sensor.getType() == Sensor.TYPE_ACCELEROMETER) { gx = x; gy = y; gz = e.values[2]; }
+            gLateral = gLongitudinal = 0;
+        }
         if (e.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
             final float a = 0.88f;
-            gx = a * gx + (1f - a) * e.values[0];
-            gy = a * gy + (1f - a) * e.values[1];
+            gx = a * gx + (1f - a) * x;
+            gy = a * gy + (1f - a) * y;
             gz = a * gz + (1f - a) * e.values[2];
             rawRoll = (float)Math.toDegrees(Math.atan2(gx, Math.sqrt(gy * gy + gz * gz)));
             rawPitch = (float)Math.toDegrees(Math.atan2(-gy, Math.sqrt(gx * gx + gz * gz)));
             if (!usingLinear) {
-                linearX = e.values[0] - gx;
-                linearY = e.values[1] - gy;
+                linearX = x - gx;
+                linearY = y - gy;
             }
         } else if (e.sensor.getType() == Sensor.TYPE_LINEAR_ACCELERATION) {
-            linearX = e.values[0];
-            linearY = e.values[1];
+            linearX = x;
+            linearY = y;
         }
         float lat = linearX / SensorManager.GRAVITY_EARTH;
         float lon = -linearY / SensorManager.GRAVITY_EARTH;
@@ -100,15 +150,17 @@ public class DrivingInstruments extends View implements SensorEventListener {
         ConvoyService service = ConvoyService.current;
         Location loc = service == null ? null : service.fix;
         float mph = 0;
-        if (loc != null && loc.hasSpeed()) mph = Math.max(0, loc.getSpeed()*2.2369363f);
+        boolean fresh = loc != null && (SystemClock.elapsedRealtimeNanos() - loc.getElapsedRealtimeNanos()) / 1000000L <= 15000;
+        boolean hasSpeed = fresh && loc.hasSpeed() && Float.isFinite(loc.getSpeed()) && loc.getSpeed() >= 0;
+        if (hasSpeed) mph = loc.getSpeed()*2.2369363f;
         float cx=r.centerX(), cy=r.top+r.height()*0.53f;
         float radius=Math.min(r.width()*0.37f, r.height()*0.30f);
         RectF arc=new RectF(cx-radius,cy-radius,cx+radius,cy+radius);
         stroke(0xFF42525C, 7); c.drawArc(arc,135,270,false,p);
         stroke(0xFF72E5BD, 7); c.drawArc(arc,135,Math.min(270,mph/100f*270f),false,p);
-        txt(0xFFF2F7F8, 27, true); centered(c, Integer.toString(Math.round(mph)), cx, cy+8*density);
+        txt(0xFFF2F7F8, 27, true); centered(c, hasSpeed ? Integer.toString(Math.round(mph)) : "—", cx, cy+8*density);
         txt(0xFF9EB1BC, 8, false); centered(c,"mph",cx,cy+20*density);
-        txt(0xFF6D8390, 7, false); centered(c,"GPS",cx,r.bottom-8*density);
+        txt(0xFF6D8390, 7, false); centered(c,loc == null ? "NO FIX" : !fresh ? "GPS STALE" : "GPS",cx,r.bottom-8*density);
     }
 
     private void drawForce(Canvas c, RectF r) {
@@ -126,19 +178,28 @@ public class DrivingInstruments extends View implements SensorEventListener {
         float mag=(float)Math.sqrt(gLateral*gLateral+gLongitudinal*gLongitudinal);
         color(0xFFFFA000);c.drawCircle(cx+bx,cy+by,6*density,p);
         color(0xFFFFD66B);c.drawCircle(cx+bx-1.5f*density,cy+by-1.5f*density,2*density,p);
-        txt(0xFFF0F5F6,8,true); centered(c,String.format(Locale.US,"%.2fg",mag),cx,cy+rad+15*density);
+        txt(0xFFF0F5F6,8,true); centered(c,accel == null && linear == null ? "SENSOR N/A" : String.format(Locale.US,"%.2fg",mag),cx,cy+rad+15*density);
         float pitch = rawPitch-zeroPitch, roll = rawRoll-zeroRoll;
-        txt(0xFF9EB1BC,7,false); centered(c,String.format(Locale.US,"P %.0f°  R %.0f°",pitch,roll),cx,r.bottom-15*density);
+        txt(0xFF9EB1BC,7,false); centered(c,accel == null ? "TILT N/A" : String.format(Locale.US,"P %.0f°  R %.0f°",pitch,roll),cx,r.bottom-15*density);
         txt(0xFF6D8390,6,false); centered(c,"tap to zero",cx,r.bottom-5*density);
     }
 
     @Override public boolean onTouchEvent(MotionEvent e) {
         if (e.getActionMasked() == MotionEvent.ACTION_UP && e.getY() > getHeight()*0.36f) {
-            zeroPitch = rawPitch; zeroRoll = rawRoll;
-            invalidate(); performClick(); return true;
+            performClick(); return true;
         }
         return true;
     }
 
-    @Override public boolean performClick() { super.performClick(); return true; }
+    @Override public boolean performClick() {
+        super.performClick();
+        if (accel != null) {
+            zeroPitch = rawPitch; zeroRoll = rawRoll;
+            getContext().getSharedPreferences("driving-instruments", Context.MODE_PRIVATE).edit()
+                    .putFloat("zero-pitch-" + sensorRotation, zeroPitch).putFloat("zero-roll-" + sensorRotation, zeroRoll).apply();
+            invalidate();
+            announceForAccessibility("Tilt gauge calibrated");
+        }
+        return true;
+    }
 }

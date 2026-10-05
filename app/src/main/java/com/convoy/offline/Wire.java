@@ -13,6 +13,7 @@ public final class Wire {
  public static final UUID BT_UUID=UUID.fromString("8f4337a0-6c5b-4d88-a926-5cb72ce4bdb3");
  public static final int PORT=45871;
  public static byte[] groupKey(String password) throws Exception {
+  if(password==null)throw new IOException("Missing group key");
   PBEKeySpec spec=new PBEKeySpec(password.toCharArray(),"Convoy-v2-group".getBytes("UTF-8"),120000,256);
   try{return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).getEncoded();}finally{spec.clearPassword();}
  }
@@ -33,7 +34,7 @@ public final class Wire {
   }
   private byte[] nonce(byte[] prefix,long sequence){return ByteBuffer.allocate(12).put(prefix).putLong(sequence).array();}
   public synchronized void send(byte[] data)throws Exception{
-   if(data.length>MAX)throw new IOException("Packet too large");
+   if(data==null||data.length>MAX)throw new IOException("Packet too large or missing");
    Cipher c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.ENCRYPT_MODE,new SecretKeySpec(key,"AES"),new GCMParameterSpec(128,nonce(sendPrefix,sent++)));
    byte[] encrypted=c.doFinal(data);out.writeInt(encrypted.length);out.write(encrypted);out.flush();
   }
@@ -45,15 +46,26 @@ public final class Wire {
  public static final class Packet {
   public int type;public String id,name,car="generic";public double lat,lon;public float accuracy;public long fixAge;public byte[] audio;
   public byte[] encode()throws IOException{
+   validate();
    ByteArrayOutputStream b=new ByteArrayOutputStream();DataOutputStream d=new DataOutputStream(b);d.writeByte(type);d.writeUTF(id);d.writeUTF(name);d.writeUTF(car==null?"generic":car);
    if(type==1){d.writeDouble(lat);d.writeDouble(lon);d.writeFloat(accuracy);d.writeLong(fixAge);}else if(type==2){d.writeInt(audio.length);d.write(audio);}return b.toByteArray();
   }
   public static Packet decode(byte[] data)throws IOException{
+   if(data==null||data.length>MAX)throw new IOException("Packet too large or missing");
    DataInputStream d=new DataInputStream(new ByteArrayInputStream(data));Packet p=new Packet();p.type=d.readUnsignedByte();p.id=d.readUTF();p.name=d.readUTF();p.car=d.readUTF();
-   if(p.id.length()!=36||p.name.length()>32||p.car.length()>16)throw new IOException("Invalid identity");
-   if(p.type==1){p.lat=d.readDouble();p.lon=d.readDouble();p.accuracy=d.readFloat();p.fixAge=d.readLong();if(!Double.isFinite(p.lat)||!Double.isFinite(p.lon)||Math.abs(p.lat)>90||Math.abs(p.lon)>180||!Float.isFinite(p.accuracy)||p.accuracy<0||p.fixAge< -1)throw new IOException("Invalid GPS");}
+   p.validateIdentity();
+   if(p.type==1){p.lat=d.readDouble();p.lon=d.readDouble();p.accuracy=d.readFloat();p.fixAge=d.readLong();}
    else if(p.type==2){int n=d.readInt();if(n<2||n>3200||n%2!=0)throw new IOException("Invalid audio");p.audio=new byte[n];d.readFully(p.audio);}else throw new IOException("Unknown packet");
-   if(d.available()!=0)throw new IOException("Trailing bytes");return p;
+   if(d.available()!=0)throw new IOException("Trailing bytes");p.validate();return p;
+  }
+  private void validateIdentity()throws IOException{
+   if(id==null||id.length()!=36||name==null||name.length()>32||(car!=null&&car.length()>16))throw new IOException("Invalid identity");
+  }
+  private void validate()throws IOException{
+   validateIdentity();
+   if(type==1){if(!Double.isFinite(lat)||!Double.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180||!Float.isFinite(accuracy)||accuracy<0||fixAge< -1)throw new IOException("Invalid GPS");}
+   else if(type==2){if(audio==null||audio.length<2||audio.length>3200||audio.length%2!=0)throw new IOException("Invalid audio");}
+   else throw new IOException("Unknown packet");
   }
  }
 }

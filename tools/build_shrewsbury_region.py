@@ -45,7 +45,9 @@ DEFAULT_KMH={
 
 def request_overpass(query:str, cache:Path):
     if cache.exists():
-        with gzip.open(cache,"rt",encoding="utf-8") as f: return json.load(f)
+        with gzip.open(cache,"rt",encoding="utf-8") as f: doc = json.load(f)
+        validate_overpass(doc)
+        return doc
     data=urllib.parse.urlencode({"data":query}).encode()
     last=None
     for round_no in range(4):
@@ -55,6 +57,7 @@ def request_overpass(query:str, cache:Path):
                 with urllib.request.urlopen(req,timeout=300) as r:
                     raw=r.read()
                 doc=json.loads(raw.decode("utf-8"))
+                validate_overpass(doc)
                 cache.parent.mkdir(parents=True,exist_ok=True)
                 with gzip.open(cache,"wt",encoding="utf-8",compresslevel=6) as f:json.dump(doc,f,separators=(",",":"),ensure_ascii=False)
                 return doc
@@ -63,6 +66,11 @@ def request_overpass(query:str, cache:Path):
                 print(f"Overpass attempt failed: {endpoint}: {e}",file=sys.stderr)
                 time.sleep(3+round_no*5)
     raise RuntimeError(f"Overpass failed: {last}")
+
+def validate_overpass(doc):
+    """Never publish a partial/empty offline pack after an Overpass timeout."""
+    if not isinstance(doc, dict) or doc.get("remark") or not doc.get("elements"):
+        raise ValueError("Overpass returned an empty or incomplete region")
 
 def hav(lat1,lon1,lat2,lon2):
     r=6371000.0
@@ -106,20 +114,23 @@ def build_graph(doc,outfile:Path):
         t=el.get("tags",{}); h=t.get("highway","")
         geom=el.get("geometry") or []
         if h not in DEFAULT_KMH or len(geom)<2:continue
-        access=(t.get("motor_vehicle") or t.get("motorcar") or t.get("access") or "").lower()
+        access=(t.get("motorcar") or t.get("motor_vehicle") or t.get("vehicle") or t.get("access") or "").lower()
         if access in {"no","private"}:continue
         osm_nodes=el.get("nodes") or []
         nids=[node(osm_nodes[i] if i < len(osm_nodes) else None,g["lat"],g["lon"]) for i,g in enumerate(geom)]
         kmh=maxspeed_kmh(t.get("maxspeed"),DEFAULT_KMH[h]); nid=name_id(clean_name(t))
-        one=(t.get("oneway") or "").lower(); junction=(t.get("junction") or "").lower()
+        one=(t.get("oneway:motorcar") or t.get("oneway:motor_vehicle") or t.get("oneway") or "").lower()
+        if not one and (t.get("junction", "").lower() == "roundabout" or h == "motorway"):
+            one = "yes"
         forward=one not in {"-1","reverse"}
-        backward=one not in {"yes","1","true"} and junction!="roundabout"
-        if one in {"-1","reverse"}:backward=True
+        backward=one not in {"yes","1","true"}
+        forward_speed=maxspeed_kmh(t.get("maxspeed:forward"),kmh)
+        backward_speed=maxspeed_kmh(t.get("maxspeed:backward"),kmh)
         for j in range(1,len(nids)):
             u,v=nids[j-1],nids[j]; a=nodes[u]; b=nodes[v]; dist=hav(a[0],a[1],b[0],b[1])
             if dist<0.3:continue
-            if forward:raw_edges.append((u,v,float(dist),float(kmh),nid))
-            if backward:raw_edges.append((v,u,float(dist),float(kmh),nid))
+            if forward:raw_edges.append((u,v,float(dist),float(forward_speed),nid))
+            if backward:raw_edges.append((v,u,float(dist),float(backward_speed),nid))
         ways+=1
     adj=defaultdict(list)
     for u,v,d,s,n in raw_edges:adj[u].append((v,d,s,n))
@@ -168,6 +179,8 @@ def build_places(doc,outfile:Path):
         else:
             c=el.get("center") or {};la,lo=c.get("lat"),c.get("lon")
         if la is None or lo is None:continue
+        la,lo=float(la),float(lo)
+        if not math.isfinite(la) or not math.isfinite(lo) or not (-90 <= la <= 90 and -180 <= lo <= 180):continue
         cat=category(t);brand=(t.get("brand") or "").strip()
         key=(round(float(la),6),round(float(lo),6),name.lower(),cat)
         if key in seen:continue
