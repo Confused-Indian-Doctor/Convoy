@@ -395,6 +395,21 @@ adb shell dumpsys package com.convoy.offline > build/smoke/package.txt
 # Dashboard navigation and local map GPS must work before any convoy exists.
 wait_control text 'Your driving dashboard' 'Home dashboard' >/dev/null
 wait_service stopped
+for permission in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION; do
+  adb shell pm revoke com.convoy.offline "android.permission.$permission"
+  adb shell pm set-permission-flags com.convoy.offline "android.permission.$permission" user-set user-fixed
+done
+adb shell am start -W -n com.convoy.offline/.MainActivity >/dev/null
+wait_control text 'Your driving dashboard' 'Home after location permission revocation' >/dev/null
+tap_control text Map 'Map with permission denied'
+wait_control text 'Location permission required' 'honest location denial state' >/dev/null
+wait_service stopped
+adb shell input keyevent 4
+wait_control text 'Your driving dashboard' 'Back from denied map' >/dev/null
+for permission in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION; do
+  adb shell pm clear-permission-flags com.convoy.offline "android.permission.$permission" user-set user-fixed
+  adb shell pm grant com.convoy.offline "android.permission.$permission"
+done
 tap_control text Map 'Map destination'
 adb shell cmd location set-location-enabled true
 adb emu geo fix -2.7541 52.7078 >/dev/null
@@ -409,7 +424,12 @@ tap_control text 'Import GPX' 'system GPX picker'
 sleep 2
 adb shell dumpsys activity activities > "$private_dir/picker.txt"
 grep -Eiq 'documentsui|DocumentsActivity' "$private_dir/picker.txt" || { echo 'GPX document picker did not open.' >&2; exit 1; }
-adb shell input keyevent 4
+# DocumentsUI may consume Back to leave its initial folder before closing.
+for attempt in 1 2 3 4; do
+  adb shell input keyevent 4
+  sleep 1
+  if dump_ui && locate_ui text 'Import GPX' >/dev/null; then break; fi
+done
 wait_control text 'Import GPX' 'Routes restored after picker' >/dev/null
 adb shell input keyevent 4
 wait_control text 'Your driving dashboard' 'Back Routes to Home' >/dev/null

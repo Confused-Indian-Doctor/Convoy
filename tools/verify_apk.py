@@ -57,6 +57,13 @@ with ZipFile(apk) as z:
         with sqlite3.connect(database) as db:
             assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok", "Corrupt place index"
             assert db.execute("SELECT COUNT(*) FROM places").fetchone()[0] > 0, "Empty place index"
+    style = json.loads(z.read("assets/convoy-style.json"))
+    assert "gpx" in style["sources"] and "gpx-waypoints" in style["sources"], "GPX layers missing"
+    layers = {layer["id"]: layer for layer in style["layers"]}
+    assert any(layer.get("source") == "gpx" and layer["type"] == "line" for layer in layers.values()), "GPX line missing"
+    for car in ("nc", "gt86", "r34", "supra", "nsx", "gc8", "evo6", "ae86", "350z", "na", "generic"):
+        assert any(name.endswith("/car_" + car + ".webp") for name in z.namelist()), "Missing vehicle icon: " + car
+    print("PASS GPX sources, line layers and eleven existing vehicle icons")
     native = [name for name in z.namelist() if name.startswith("lib/") and "maplibre" in name and name.endswith(".so")]
     assert native, "MapLibre native runtime missing"
     assert any(name.startswith("lib/x86_64/") for name in native), "Emulator MapLibre runtime missing"

@@ -183,6 +183,13 @@ jobs:
             build/release/unsigned.sha256
             build/release/apk-badging.txt
             build/release/packaging-checks.txt
+            build/gpx-tests.txt
+            build/map-pack-tests.txt
+            build/location-tests.txt
+            build/navigation-tests.txt
+            build/trip-plan-tests.txt
+            build/release/debug-signing-verification.txt
+            build/release/debug-packaging-checks.txt
             build/protocol-tests.txt
             build/routing-tests.txt
             build/pmtiles-validation-tests.txt
@@ -237,6 +244,13 @@ jobs:
           name: Convoy-${{ env.CONVOY_VERSION || 'build' }}-validation
           path: |
             build/smoke/
+            build/gpx-tests.txt
+            build/map-pack-tests.txt
+            build/location-tests.txt
+            build/navigation-tests.txt
+            build/trip-plan-tests.txt
+            build/release/debug-signing-verification.txt
+            build/release/debug-packaging-checks.txt
             build/protocol-tests.txt
             build/routing-tests.txt
             build/pmtiles-validation-tests.txt

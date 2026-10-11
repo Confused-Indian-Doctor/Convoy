@@ -210,7 +210,7 @@ public class MainActivity extends Activity {
   LinearLayout routeCopy=new LinearLayout(this);routeCopy.setOrientation(LinearLayout.VERTICAL);
   routeTitle=text("Ready for the road",20,TEXT);routeTitle.setTypeface(null,Typeface.BOLD);routeTitle.setSingleLine(true);
   routeTitle.setEllipsize(TextUtils.TruncateAt.END);routeCopy.addView(routeTitle);
-  routeSummary=text("Choose a place or plan your next stop",12,MUTED);routeSummary.setSingleLine(true);
+  routeSummary=text("Choose a place or plan your next stop",12,MUTED);routeSummary.setMaxLines(3);
   routeSummary.setEllipsize(TextUtils.TruncateAt.END);routeCopy.addView(routeSummary);
   routeRow.addView(routeCopy,new LinearLayout.LayoutParams(0,-2,1));
   routeAction=button("Plan",false);routeAction.setTextColor(GREEN);routeAction.setElevation(0);
@@ -469,7 +469,7 @@ public class MainActivity extends Activity {
   }
  }
  private void activateRoute(String id,boolean follow,boolean viewMap){
-  storageWorker.execute(()->{try{routeLibrary.setActive(id,follow);GpxRoute route=routeLibrary.load(id);runOnUiThread(()->{if(isDestroyed())return;activeGpxId=id;activeGpx=route;followingGpx=follow;map.setGpxRoute(route,follow);if(viewMap){openScreen(NavigationState.MAP);map.focusGpxRoute();}else renderTab();updateNavigationBanner();});}catch(Exception e){runOnUiThread(()->alert("Could not activate this route: "+e.getMessage()));}});
+  storageWorker.execute(()->{try{routeLibrary.setActive(id,follow);GpxRoute route=routeLibrary.load(id);runOnUiThread(()->{if(isDestroyed())return;activeGpxId=id;activeGpx=route;followingGpx=follow;map.setGpxRoute(route,follow);if(viewMap){openScreen(NavigationState.MAP);if(follow)map.recenter();else map.focusGpxRoute();}else renderTab();updateNavigationBanner();});}catch(Exception e){runOnUiThread(()->alert("Could not activate this route: "+e.getMessage()));}});
  }
  private void renameRoute(RouteLibrary.Entry entry){
   EditText input=new EditText(this);input.setTextColor(TEXT);input.setSingleLine(true);input.setText(entry.name);input.setSelectAllOnFocus(true);

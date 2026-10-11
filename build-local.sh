@@ -43,6 +43,8 @@ unsigned="build/release/Convoy-${version}-aligned-unsigned.apk"
   app/build/outputs/apk/release/app-release-unsigned.apk "$unsigned"
 "$sdk/build-tools/35.0.0/zipalign" -c -P 16 4 "$unsigned"
 python3 tools/verify_apk.py "$unsigned" | tee build/release/packaging-checks.txt
+python3 tools/verify_apk.py app/build/outputs/apk/debug/app-debug.apk | tee build/release/debug-packaging-checks.txt
+"$sdk/build-tools/35.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk > build/release/debug-signing-verification.txt
 "$sdk/build-tools/35.0.0/aapt2" dump badging "$unsigned" > build/release/apk-badging.txt
 version_code="$(sed -n 's/.*versionCode \([0-9][0-9]*\).*/\1/p' app/build.gradle)"
 python3 - "$version_code" "$version" <<'PYVERSION'
