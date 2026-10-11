@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Convoy automated smoke test" xmlns="http://www.topografix.com/GPX/1/1">
+ <wpt lat="52.709" lon="-2.753"><name>Smoke meeting point</name></wpt>
+ <trk><name>Convoy smoke GPX</name><trkseg>
+  <trkpt lat="52.7078" lon="-2.7541"/>
+  <trkpt lat="52.709" lon="-2.753"/>
+  <trkpt lat="52.710" lon="-2.752"/>
+ </trkseg><trkseg>
+  <trkpt lat="52.713" lon="-2.749"/>
+  <trkpt lat="52.714" lon="-2.748"/>
+ </trkseg></trk>
+</gpx>

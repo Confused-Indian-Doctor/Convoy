@@ -216,7 +216,7 @@ public class MainActivity extends Activity {
   routeAction=button("Plan",false);routeAction.setTextColor(GREEN);routeAction.setElevation(0);
   routeRow.addView(routeAction,new LinearLayout.LayoutParams(dp(64),dp(48)));
   routeAction.setOnClickListener(v->{
-   if(activeGpx!=null){showRouteDetails(activeGpxId);return;}
+   if(activeGpx!=null&&!map.hasManualTarget()){showRouteDetails(activeGpxId);return;}
    if(map.hasManualTarget())new AlertDialog.Builder(this).setTitle("Stop navigating here?")
            .setMessage("Your saved trip plan will stay available.").setNegativeButton("Continue",null)
            .setPositiveButton("Stop route",(d,w)->{map.clearManualTarget();updateNavigationBanner();}).show();
@@ -590,8 +590,8 @@ public class MainActivity extends Activity {
   String target=map.getTargetName(),instruction=map.getInstruction();float metres=map.getDistanceRemaining();int eta=map.getEtaSeconds();
   boolean routing=target!=null&&!target.isEmpty();
   navigationBanner.setVisibility(routing?View.VISIBLE:View.GONE);
-  updateText(routeAction,map.hasManualTarget()?"Stop":"Plan");
-  updateDescription(routeAction,map.hasManualTarget()?"Stop navigating to this place":"Open your trip plan");
+  updateText(routeAction,map.hasManualTarget()?"Stop":activeGpx!=null?"Routes":"Plan");
+  updateDescription(routeAction,map.hasManualTarget()?"Stop navigating to this place":activeGpx!=null?"Open GPX route details":"Open your trip plan");
   if(!routing&&activeGpx!=null){
    GpxRoute.Progress progress=map.getGpxProgress();
    updateText(routeTitle,activeGpx.name);updateText(routeAction,"Routes");
@@ -616,12 +616,13 @@ public class MainActivity extends Activity {
           turn.contains("arriv")?R.drawable.ic_location:R.drawable.ic_direction;
   if(directionResource!=nextDirection){directionResource=nextDirection;directionIcon.setImageResource(nextDirection);}
   updateText(navSecondary,instruction);updateDescription(navSecondary,instruction);
+  String summary;
   if(metres>=0){
    updateText(routeTitle,metres==0?"Arrived":eta>0?formatEta(eta):formatMiles(metres));
-   updateText(routeSummary,formatMiles(metres)+(eta>0?" · arrive "+clockEta(eta):"")+" · "+target);
-  }else{
-   updateText(routeTitle,target);updateText(routeSummary,instruction);
-  }
+   summary=formatMiles(metres)+(eta>0?" · arrive "+clockEta(eta):"")+" · "+target;
+  }else{updateText(routeTitle,target);summary=instruction;}
+  if(activeGpx!=null){GpxRoute.Progress gpx=map.getGpxProgress();summary+="\n"+(followingGpx?"Following GPX: ":"GPX: ")+activeGpx.name+(gpx==null?"":" • "+formatDistance((float)gpx.remainingMeters)+" remaining");}
+  updateText(routeSummary,summary);
   updateDescription(routeSummary,routeSummary.getText());applyMapLayout();
  }
  private String formatMiles(float metres){if(metres<=0)return "0 m";if(metres<161)return Math.max(10,Math.round(metres/10f)*10)+" m";if(metres<1609)return Math.round(metres*1.09361f)+" yd";return String.format(Locale.UK,"%.1f mi",metres/1609.344f);}

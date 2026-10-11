@@ -442,7 +442,19 @@ sleep 1
 adb shell am start -W -n com.convoy.offline/.MainActivity >/dev/null
 wait_control text 'Your driving dashboard' 'Home restored after normal Back' >/dev/null
 printf 'PASS Home, map-only GPS, document picker and main-screen Back.\n' > build/smoke/home-navigation.txt
-tap_control text Map 'Map before convoy setup'
+# Import an actual original through the Android document provider, then follow it.
+adb shell mkdir -p /sdcard/Download
+adb push tests/fixtures/smoke-route.gpx /sdcard/Download/ConvoySmoke.gpx >/dev/null
+tap_control text Routes 'Routes for real GPX import'
+tap_control text 'Import GPX' 'GPX picker for fixture'
+tap_control text 'ConvoySmoke.gpx' 'local GPX document' true
+wait_control text 'Convoy smoke GPX' 'imported named GPX detail' >/dev/null
+tap_control text 'Follow route' 'offline GPX following'
+wait_control prefix 'Following GPX track' 'GPX status on Map' >/dev/null
+wait_service stopped
+adb exec-out screencap -p > build/smoke/gpx-following.png
+printf 'PASS real Android-provider GPX import and map following without convoy.\n' > build/smoke/gpx-import.txt
+
 
 # Start through the activity: the service intentionally cannot be started by adb.
 adb shell cmd location set-location-enabled true
