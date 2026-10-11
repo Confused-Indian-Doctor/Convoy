@@ -82,7 +82,7 @@ public class MainActivity extends Activity {
  }
  private Button iconButton(int icon,String description){
   Button b=button("",false);android.graphics.drawable.Drawable d=getDrawable(icon);
-  if(d!=null){d.setBounds(0,0,dp(24),dp(24));b.setCompoundDrawables(d,null,null,null);}
+  if(d!=null){d=d.mutate();d.setTint(TEXT);d.setBounds(0,0,dp(24),dp(24));b.setCompoundDrawables(d,null,null,null);}
   b.setPadding(dp(12),dp(10),dp(12),dp(10));b.setContentDescription(description);return b;
  }
  private void spaced(LinearLayout parent,View child,int height){
@@ -144,6 +144,7 @@ public class MainActivity extends Activity {
   LinearLayout searchRow=new LinearLayout(this);searchRow.setGravity(Gravity.CENTER_VERTICAL);
   Button search=button("Search offline places",false);search.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);
   search.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_search,0,0,0);search.setCompoundDrawablePadding(dp(10));
+  for(android.graphics.drawable.Drawable icon:search.getCompoundDrawables())if(icon!=null)icon.mutate().setTint(MUTED);
   search.setSingleLine(true);search.setEllipsize(TextUtils.TruncateAt.END);
   search.setContentDescription("Search places stored on this phone");search.setOnClickListener(v->searchPlaces());
   LinearLayout.LayoutParams searchParams=new LinearLayout.LayoutParams(0,dp(52),1);searchParams.rightMargin=dp(8);
@@ -214,8 +215,8 @@ public class MainActivity extends Activity {
   routeSummary=text("Choose a place or plan your next stop",12,MUTED);routeSummary.setMaxLines(3);
   routeSummary.setEllipsize(TextUtils.TruncateAt.END);routeCopy.addView(routeSummary);
   routeRow.addView(routeCopy,new LinearLayout.LayoutParams(0,-2,1));
-  routeAction=button("Plan",false);routeAction.setTextColor(GREEN);routeAction.setElevation(0);
-  routeRow.addView(routeAction,new LinearLayout.LayoutParams(dp(64),dp(48)));
+  routeAction=button("Plan",false);routeAction.setTextColor(GREEN);routeAction.setElevation(0);routeAction.setSingleLine(true);
+  routeRow.addView(routeAction,new LinearLayout.LayoutParams(dp(80),dp(48)));
   routeAction.setOnClickListener(v->{
    if(activeGpx!=null&&!map.hasManualTarget()){showRouteDetails(activeGpxId);return;}
    if(map.hasManualTarget())new AlertDialog.Builder(this).setTitle("Stop navigating here?")
