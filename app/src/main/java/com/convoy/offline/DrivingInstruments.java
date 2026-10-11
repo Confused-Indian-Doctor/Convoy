@@ -147,10 +147,9 @@ public class DrivingInstruments extends View implements SensorEventListener {
 
     private void drawSpeed(Canvas c, RectF r) {
         txt(0xFF9EB1BC, 8, true); c.drawText("SPEED", r.left+8*density, r.top+15*density, p);
-        ConvoyService service = ConvoyService.current;
-        Location loc = service == null ? null : service.fix;
+        Location loc = CurrentLocation.get(getContext()).fix();
         float mph = 0;
-        boolean fresh = loc != null && (SystemClock.elapsedRealtimeNanos() - loc.getElapsedRealtimeNanos()) / 1000000L <= 15000;
+        boolean fresh = loc != null && CurrentLocation.ageMillis(loc) <= LocationPolicy.FRESH_MILLIS;
         boolean hasSpeed = fresh && loc.hasSpeed() && Float.isFinite(loc.getSpeed()) && loc.getSpeed() >= 0;
         if (hasSpeed) mph = loc.getSpeed()*2.2369363f;
         float cx=r.centerX(), cy=r.top+r.height()*0.53f;

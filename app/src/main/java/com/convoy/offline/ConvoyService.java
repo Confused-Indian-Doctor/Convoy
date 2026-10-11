@@ -4,7 +4,7 @@ import android.Manifest;import android.annotation.SuppressLint;import android.co
 import android.app.*;import android.content.*;import android.content.pm.ServiceInfo;import android.bluetooth.*;import android.location.*;import android.media.*;import android.media.audiofx.*;import android.net.*;import android.net.wifi.*;import android.os.*;
 import java.io.*;import java.net.*;import java.util.*;import java.util.concurrent.*;
 
-public class ConvoyService extends Service implements LocationListener {
+public class ConvoyService extends Service {
  public static volatile ConvoyService current;
  public static final class Member {
   public String id,name,car="generic";public double lat,lon;public float accuracy;public long received,fixAge;public boolean located;
@@ -13,16 +13,17 @@ public class ConvoyService extends Service implements LocationListener {
  public final ConcurrentHashMap<String,Member> members=new ConcurrentHashMap<>();
  public volatile String status="Starting…", detail="", hotspotInfo="",talker="";
  public volatile boolean active=false,host=false, bluetooth=false,ptt=false,vox=false,muted=false,transmitting=false;
+ public volatile boolean voiceEnabled=false;
  public volatile Location fix; public String myId,myName,myCar="generic";
  private byte[] key;private String address;private final CopyOnWriteArrayList<Link> links=new CopyOnWriteArrayList<>();
  private final Set<Closeable> pending=ConcurrentHashMap.newKeySet();
  private final ExecutorService workers=Executors.newCachedThreadPool();private final Handler main=new Handler(Looper.getMainLooper());
- private ServerSocket server;private BluetoothServerSocket btServer;private LocationManager gps;
+ private ServerSocket server;private BluetoothServerSocket btServer;private CurrentLocation location;
+ private Notification tripNotification;
  private WifiManager.LocalOnlyHotspotReservation hotspot;private WifiManager.WifiLock wifiLock;private PowerManager.WakeLock wakeLock;
  private volatile AudioRecord recorder;private volatile AudioTrack player;private final ArrayBlockingQueue<byte[]> playback=new ArrayBlockingQueue<>(12);
  private volatile long lastSound=0;private volatile String speakerId="";private volatile long speakerUntil=0;
  private AudioManager audioManager;private AudioFocusRequest focusRequest;private volatile boolean audioFocused=true;
- private long lastGpsNotice=0;
  public int connectionCount(){return links.size();}
  @Override public IBinder onBind(Intent i){return null;}
  @Override public int onStartCommand(Intent intent,int flags,int startId){
@@ -34,25 +35,24 @@ public class ConvoyService extends Service implements LocationListener {
   NotificationManager nm=getSystemService(NotificationManager.class);nm.createNotificationChannel(new NotificationChannel("trip","Active convoy",NotificationManager.IMPORTANCE_LOW));
   PendingIntent open=PendingIntent.getActivity(this,0,new Intent(this,MainActivity.class),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
   PendingIntent stop=PendingIntent.getService(this,1,new Intent(this,ConvoyService.class).setAction("STOP"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-  Notification n=new Notification.Builder(this,"trip").setSmallIcon(com.convoy.offline.R.drawable.icon).setContentTitle("Convoy • sharing enabled").setContentText("GPS active · microphone used for talk / hands-free").setContentIntent(open).setOngoing(true).addAction(new Notification.Action.Builder(null,"End trip",stop).build()).build();
+  Notification n=new Notification.Builder(this,"trip").setSmallIcon(com.convoy.offline.R.drawable.icon).setContentTitle("Convoy • sharing enabled").setContentText("Local GPS and crew connection active • voice optional").setContentIntent(open).setOngoing(true).addAction(new Notification.Action.Builder(null,"End trip",stop).build()).build();tripNotification=n;
   try{
-   if(checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED)throw new SecurityException("Allow precise Location in Android app settings, then start the trip again.");
-   if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)throw new SecurityException("Allow Microphone in Android app settings, then start the trip again.");
+   if(checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED&&checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)!=PackageManager.PERMISSION_GRANTED)throw new SecurityException("Allow Location in Android app settings, then start the convoy again.");
    if(bluetooth)requireBluetoothPermission();
    if(Build.VERSION.SDK_INT>=29){
     int types=ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION|ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE|ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK;
-    if(Build.VERSION.SDK_INT>=30)types|=ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
     startForeground(41,n,types);
    }else startForeground(41,n);
    wakeLock=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"Convoy:trip");wakeLock.acquire(12*60*60*1000L);
    WifiManager wm=(WifiManager)getApplicationContext().getSystemService(WIFI_SERVICE);if(wm!=null&&!bluetooth){wifiLock=wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF,"Convoy:radio");wifiLock.acquire();}
-   gps=(LocationManager)getSystemService(LOCATION_SERVICE);
-   startGpsUpdates();
+   location=CurrentLocation.get(this);
+   location.setConvoyClient(this,snapshot->fix=snapshot.fix,true);
    audioManager=(AudioManager)getSystemService(AUDIO_SERVICE);
    focusRequest=new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()).setOnAudioFocusChangeListener(change->{audioFocused=change==AudioManager.AUDIOFOCUS_GAIN;if(!audioFocused){ptt=false;vox=false;playback.clear();}},main).build();
    audioFocused=audioManager.requestAudioFocus(focusRequest)==AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
    if(!audioFocused)detail="Audio unavailable while another app or call has focus.";
-   workers.execute(this::recordLoop);workers.execute(this::playLoop);
+   workers.execute(this::playLoop);
+   if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)enableVoice();
    String pass=intent.getStringExtra("key");boolean autoHotspot=intent.getBooleanExtra("hotspot",false);
    workers.execute(()->{try{key=Wire.groupKey(pass);if(!active)return;if(host){if(bluetooth)hostBluetooth();else hostWifi();}else joinLoop();}catch(Exception e){status="Could not start connection";detail=message(e);}});
    if(host&&!bluetooth&&autoHotspot&&wm!=null)try{startAutomaticHotspot(wm);}catch(RuntimeException e){detail="Automatic hotspot unavailable. Use a manual hotspot or local Wi-Fi: "+message(e);}
@@ -60,12 +60,14 @@ public class ConvoyService extends Service implements LocationListener {
   }catch(Exception e){status="Permission or device error";detail=message(e);stopSelf();}
   return START_NOT_STICKY;
  }
- private void startGpsUpdates(){
-  if(checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED){
-   if(gps==null||!gps.getAllProviders().contains(LocationManager.GPS_PROVIDER)){detail="GPS is unavailable on this device. Voice and convoy connections remain available.";return;}
-   if(gps.isProviderEnabled(LocationManager.GPS_PROVIDER))gps.requestLocationUpdates(LocationManager.GPS_PROVIDER,2000,0,this,Looper.getMainLooper());
-   else detail="Turn on Location in Android settings. Waiting for GPS.";
-  }else throw new SecurityException("Precise Location permission is required to share positions.");
+ /** Called from the visible Activity after the user explicitly grants convoy voice permission. */
+ public synchronized boolean enableVoice(){
+  if(voiceEnabled)return true;
+  if(!active||checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)return false;
+  try{
+   if(Build.VERSION.SDK_INT>=30){int types=ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION|ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE|ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK|ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;startForeground(41,tripNotification,types);}
+   voiceEnabled=true;workers.execute(this::recordLoop);return true;
+  }catch(RuntimeException e){voiceEnabled=false;detail="Voice unavailable: "+message(e);return false;}
  }
  private void requireBluetoothPermission()throws IOException{
   String permission=Build.VERSION.SDK_INT>=31?Manifest.permission.BLUETOOTH_CONNECT:Manifest.permission.BLUETOOTH;
@@ -92,10 +94,6 @@ public class ConvoyService extends Service implements LocationListener {
   // Bound departed convoy state without erasing the immediately useful last known position.
   for(Member m:members.values())if(now-m.received>30*60*1000L)members.remove(m.id,m);
  }catch(Exception e){detail=message(e);}main.postDelayed(this,2000);}};
- @Override public void onLocationChanged(Location l){fix=new Location(l);}
- @Override public void onProviderEnabled(String p){if(!active)return;try{startGpsUpdates();}catch(SecurityException e){detail=message(e);}}
- @Override public void onProviderDisabled(String p){detail="GPS disabled • positions will become stale";}
- @Override public void onStatusChanged(String p,int s,Bundle b){}
  // All Bluetooth helpers check the runtime permission immediately before protected APIs.
  @SuppressLint("MissingPermission")
  private BluetoothAdapter adapter()throws IOException{requireBluetoothPermission();BluetoothManager manager=getSystemService(BluetoothManager.class);BluetoothAdapter a=manager==null?null:manager.getAdapter();if(a==null||!a.isEnabled())throw new IOException("Turn on Bluetooth in Android settings");return a;}
@@ -150,7 +148,7 @@ public class ConvoyService extends Service implements LocationListener {
   void close(){if(!open)return;open=false;links.remove(this);closeSocket(socket);queue.clear();if(!host&&active)status="Disconnected • retrying";}
  }
  private void broadcast(byte[] p,Link except){for(Link l:links)if(l!=except)l.offer(p);}
- public String voiceStatus(){if(!audioFocused)return "Audio paused by another app";if(transmitting)return "Transmitting • "+myName;if(SystemClock.elapsedRealtime()-lastSound<600)return "Speaking • "+talker;return vox?"Hands-free • listening for your voice":"Ready to listen";}
+ public String voiceStatus(){if(!audioFocused)return "Audio paused by another app";if(transmitting)return "Transmitting • "+myName;if(SystemClock.elapsedRealtime()-lastSound<600)return "Speaking • "+talker;if(!voiceEnabled)return "Listening • allow microphone to talk";return vox?"Hands-free • listening for your voice":"Ready to listen";}
  private void recordLoop(){AudioRecord r=null;AcousticEchoCanceler echo=null;NoiseSuppressor noise=null;
   try{
    if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)throw new SecurityException("Microphone permission was not granted.");
@@ -174,7 +172,7 @@ public class ConvoyService extends Service implements LocationListener {
     if(speak&&active&&audioFocused&&(ptt||vox)){Wire.Packet p=new Wire.Packet();p.type=2;p.id=myId;p.name=myName;p.car=myCar;p.audio=Arrays.copyOf(buffer,n-n%2);broadcast(p.encode(),null);}
    }
   }catch(Exception e){if(active)detail="Microphone: "+message(e);}
-  finally{transmitting=false;if(echo!=null)echo.release();if(noise!=null)noise.release();if(r!=null){try{r.stop();}catch(Exception ignored){}r.release();}recorder=null;}
+  finally{transmitting=false;voiceEnabled=false;ptt=false;vox=false;if(echo!=null)echo.release();if(noise!=null)noise.release();if(r!=null){try{r.stop();}catch(Exception ignored){}r.release();}recorder=null;}
  }
  private void playLoop(){AudioTrack t=null;try{
   int min=AudioTrack.getMinBufferSize(8000,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT);if(min<0)throw new IOException("8 kHz playback unsupported");
@@ -183,13 +181,13 @@ public class ConvoyService extends Service implements LocationListener {
  }catch(Exception e){if(active)detail="Speaker: "+message(e);}finally{if(t!=null){try{t.stop();}catch(Exception ignored){}t.release();}player=null;}}
  public String addresses(){try{ArrayList<String> list=new ArrayList<>();Enumeration<NetworkInterface> all=NetworkInterface.getNetworkInterfaces();while(all.hasMoreElements()){NetworkInterface n=all.nextElement();if(!n.isUp()||n.isLoopback())continue;Enumeration<InetAddress> addresses=n.getInetAddresses();while(addresses.hasMoreElements()){InetAddress a=addresses.nextElement();if(a instanceof Inet4Address&&a.isSiteLocalAddress())list.add(a.getHostAddress()+" ("+n.getName()+")");}}return list.isEmpty()?"Waiting for a Wi-Fi / hotspot address…":android.text.TextUtils.join("\n",list);}catch(Exception e){return "IP address unavailable";}}
  @Override public void onDestroy(){
-  active=false;ptt=false;vox=false;transmitting=false;main.removeCallbacksAndMessages(null);
+  active=false;ptt=false;vox=false;transmitting=false;voiceEnabled=false;main.removeCallbacksAndMessages(null);
   // Stop blocking native audio reads before interrupting workers; each worker owns release().
   AudioRecord r=recorder;if(r!=null)try{r.stop();}catch(RuntimeException ignored){}
   AudioTrack t=player;if(t!=null)try{t.stop();t.flush();}catch(RuntimeException ignored){}
   for(Link l:links)l.close();for(Closeable c:pending)closeSocket(c);pending.clear();
   if(server!=null)closeSocket(server);if(btServer!=null)try{btServer.close();}catch(Exception ignored){}
-  if(hotspot!=null)hotspot.close();if(gps!=null&&checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED)try{gps.removeUpdates(this);}catch(SecurityException ignored){}
+  if(hotspot!=null)hotspot.close();if(location!=null)location.setConvoyClient(this,null,false);
   if(audioManager!=null&&focusRequest!=null)audioManager.abandonAudioFocusRequest(focusRequest);
   if(wifiLock!=null&&wifiLock.isHeld())wifiLock.release();if(wakeLock!=null&&wakeLock.isHeld())wakeLock.release();
   workers.shutdownNow();playback.clear();members.clear();if(current==this)current=null;

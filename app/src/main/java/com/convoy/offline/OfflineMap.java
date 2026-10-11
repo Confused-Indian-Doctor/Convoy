@@ -128,7 +128,7 @@ public class OfflineMap extends View {
         super.onDraw(c);
         c.drawColor(Color.rgb(21, 35, 43));
         ConvoyService s = ConvoyService.current;
-        Location own = s == null ? null : s.fix;
+        Location own = CurrentLocation.get(getContext()).fix();
         if (follow && own != null) {
             latitude = own.getLatitude(); longitude = own.getLongitude();
             if (own.hasBearing() && own.hasSpeed() && own.getSpeed() > 0.8f) {

@@ -1,3 +1,25 @@
+# Convoy 0.5.0
+
+Convoy is an offline-first driving map and local-network convoy app (`com.convoy.offline`).
+
+Home is the dashboard for Map, Routes, Import GPX, Start/Join Convoy, Crew, Offline Maps and Guide. Android Back closes nested screens first, returns main destinations to Home, and backgrounds the app from Home. The map retains its camera when you return.
+
+Map location works without starting a convoy. Location permission is independent of microphone and nearby-device permissions. A shared `CurrentLocation` source owns one platform subscription; foreground map/route consumers and an active convoy lease use the same fix. Background map-only tracking stops. Opening Map does not start networking or voice.
+
+GPX imports use Android's document picker and run on a background worker. Original files persist in a multiple-route library; rename, delete, share, view and follow are available offline. Track segment breaks remain breaks. Amber GPX geometry is never snapped or rewritten; calculated road routes stay blue and planned stops remain separate. Following reports approximate progress, remaining distance, distance off track and named waypoints without inventing turn instructions or arrival times. Rejoin uses the installed routing graph only inside its coverage.
+
+Offline Maps provides a United Kingdom catalog: Scotland, Northern England, Southern England, Wales and Northern Ireland. Import actual compatible vector PMTiles; select, replace or remove packs. Downloads are not configured, and unknown file sizes are not invented. The bundled Shrewsbury development region remains available. Map, search and routing coverage are separate: imported basemaps do not install a routing graph or search database. Full UK routing/search packs remain future work.
+
+Private data uses `maps/uk/` for imported map packs and `routes/` for GPX originals and atomic metadata. The bundled graph and place database retain their proven asset paths. Legacy custom `region.pmtiles` and single GPX storage are migrated without discarding originals on an import failure.
+
+GPX input is bounded to 16 MiB, 100,000 points and 2,000 waypoints; invalid coordinates, malformed XML and DTD/entity declarations are rejected. PMTiles imports validate structure and use temporary files and an atomic catalog before replacing installed data.
+
+Existing Wi-Fi/local-IP and Bluetooth convoy transports, encrypted group traffic, PTT/VOX, crew markers, eleven car choices, heading mode, speedometer and calibrated G/tilt instruments remain. Local-IP transport does not require Internet and can operate over a future shared vehicle network.
+
+Release builds use the existing private signing configuration when available. Never commit a keystore or signing password. An unsigned release cannot be installed; a debug APK is a test build and cannot update an app signed with the private release identity.
+
+---
+
 # Convoy 0.4.2
 
 Convoy is an offline-first Android navigation and local convoy app. It uses MapLibre Native and open map data, retaining vector maps, heading-up driving, highlighted offline routes, ETA/distance, tappable places, nearby category searches, convoy markers, selectable JDM cars, speedometer, calibrated G-force/pitch/roll instruments, Wi-Fi/Bluetooth communication and PTT/VOX voice.
