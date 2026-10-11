@@ -36,7 +36,7 @@ bash build-local.sh
 
 This fetches the offline region, runs protocol/offline-data tests, builds release and debug variants, runs Android release lint and checks the release APK contains populated map, routing and place assets plus MapLibre native libraries. Outputs are in `build/release/`. When the offline assets have already been generated, use `bash build-local.sh --skip-region`.
 
-The GitHub workflow is `.github/workflows/Convoy-0.4.0-build.yml` (the historical path is retained). It is configured to use the same Gradle source build, then install and launch the signed release when configured, or the separate debug test variant, on an Android 35 emulator with Wi-Fi/mobile data disabled. A completed successful run produces validation artifacts containing the installation result, startup screenshot, logs and lint report; review that run for actual build and device results. An unsigned release artifact is explicitly labeled `Convoy-0.5.0-unsigned`; an unsigned APK cannot be installed.
+The GitHub workflow is `.github/workflows/Convoy-0.4.0-build.yml` (the historical path is retained). It is configured to use the same Gradle source build, then install and launch the signed release when configured, or the separate debug test variant, on Android 35 and 36 emulators with Wi-Fi/mobile data disabled. A completed successful run produces validation artifacts containing the installation result, startup screenshot, logs and lint report; review that run for actual build and device results. An unsigned release artifact is explicitly labeled `Convoy-0.5.0-unsigned`; an unsigned APK cannot be installed.
 
 ## Private release signing and updates
 
@@ -66,6 +66,11 @@ The Map Pack button accepts Protomaps-compatible vector `.pmtiles` basemaps. Off
 
 ```bash
 bash tools/run_protocol_tests.sh
+bash tools/run_gpx_tests.sh
+bash tools/run_map_pack_tests.sh
+bash tools/run_location_tests.sh
+bash tools/run_navigation_tests.sh
+bash tools/run_trip_plan_tests.sh
 bash tools/run_routing_tests.sh
 python3 -m unittest discover -s tests -p 'test_*.py'
 python3 tools/run_pmtiles_validation_tests.py

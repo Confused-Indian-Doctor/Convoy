@@ -217,6 +217,19 @@ jobs:
           disable-animations: true
           script: bash tools/emulator_smoke.sh
 
+      - name: Preserve Android 35 smoke evidence
+        run: mv build/smoke build/smoke-api35
+
+      - name: Install and launch offline on an Android 36 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: bash tools/emulator_smoke.sh
+
       - name: Upload signed installable release
         if: env.CONVOY_RELEASE_SIGNED == 'true'
         uses: actions/upload-artifact@v4
@@ -244,6 +257,7 @@ jobs:
           name: Convoy-${{ env.CONVOY_VERSION || 'build' }}-validation
           path: |
             build/smoke/
+            build/smoke-api35/
             build/gpx-tests.txt
             build/map-pack-tests.txt
             build/location-tests.txt

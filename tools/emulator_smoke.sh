@@ -454,6 +454,29 @@ wait_control prefix 'Following GPX track' 'GPX status on Map' >/dev/null
 wait_service stopped
 adb exec-out screencap -p > build/smoke/gpx-following.png
 printf 'PASS real Android-provider GPX import and map following without convoy.\n' > build/smoke/gpx-import.txt
+# Import real bundled tile content as a separate custom pack through the same picker.
+python3 - "$apk" "$private_dir/ConvoySmokeMap.pmtiles" <<'PYMAP'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    with archive.open("assets/shrewsbury.pmtiles") as source, open(sys.argv[2], "wb") as destination:
+        import shutil
+        shutil.copyfileobj(source, destination)
+PYMAP
+adb push "$private_dir/ConvoySmokeMap.pmtiles" /sdcard/Download/ConvoySmokeMap.pmtiles >/dev/null
+adb shell input keyevent 4
+wait_control text 'Your driving dashboard' 'Home before map import' >/dev/null
+tap_control text 'Offline Maps' 'Offline Maps dashboard destination' true
+tap_control text 'Import custom UK PMTiles' 'custom map import' true
+tap_control text 'ConvoySmokeMap.pmtiles' 'real PMTiles document' true
+wait_control prefix '✓ ConvoySmokeMap' 'imported map pack selected and persisted' true >/dev/null
+adb shell input keyevent 4
+wait_control text 'Your driving dashboard' 'Back Offline Maps to Home' >/dev/null
+tap_control text Map 'Map with imported pack'
+wait_control prefix 'Following GPX track' 'GPX retained after map import' >/dev/null
+wait_service stopped
+assert_running imported-map
+printf 'PASS actual PMTiles document import; GPX and bundled road data preserved.\n' > build/smoke/map-import.txt
+
 
 
 # Start through the activity: the service intentionally cannot be started by adb.

@@ -116,6 +116,7 @@ public final class RichMap extends FrameLayout {
   final int generation=++styleGeneration;
   final Context context=getContext().getApplicationContext();
   final CameraPosition previous=cameraInitialised?map.getCameraPosition():null;
+  final String previousPackId=selectedPack==null?MapPackCatalog.BUNDLED_ID:selectedPack.id;
   workers.execute(()->{try{
    File apk=new File(context.getApplicationInfo().sourceDir),directory=new File(context.getFilesDir(),"bundled-vector-maps");
    MapPack pack=null;File imported=null;
@@ -126,7 +127,7 @@ public final class RichMap extends FrameLayout {
      .replace("__BASEMAP_URI__",escapeJson("pmtiles://"+android.net.Uri.fromFile(basemap)))
      .replace("__PLACES_URI__",escapeJson("pmtiles://"+android.net.Uri.fromFile(places)));
    final MapPack loadedPack=pack;
-   main.post(()->{if(disposed||generation!=styleGeneration)return;selectedPack=loadedPack;mapName=loadedPack==null?"Shrewsbury development region":loadedPack.name;style=null;map.setStyle(new Style.Builder().fromJson(json),s->{if(disposed||generation!=styleGeneration)return;style=s;addCarImages(s);updateDynamic();updateGpxSources();if(previous!=null)map.setCameraPosition(previous);else{map.setCameraPosition(new CameraPosition.Builder().target(new LatLng(52.7078,-2.7541)).zoom(13.3).build());if(loadedPack!=null&&!loadedPack.bundled)focusBounds(loadedPack.bounds.south,loadedPack.bounds.west,loadedPack.bounds.north,loadedPack.bounds.east);}cameraInitialised=true;if(pendingGpxFocus)focusGpxRoute();refresh();});});
+   main.post(()->{if(disposed||generation!=styleGeneration)return;selectedPack=loadedPack;mapName=loadedPack==null?"Shrewsbury development region":loadedPack.name;style=null;map.setStyle(new Style.Builder().fromJson(json),s->{if(disposed||generation!=styleGeneration)return;style=s;addCarImages(s);updateDynamic();updateGpxSources();if(previous!=null)map.setCameraPosition(previous);else{map.setCameraPosition(new CameraPosition.Builder().target(new LatLng(52.7078,-2.7541)).zoom(13.3).build());if(loadedPack!=null&&!loadedPack.bundled)focusBounds(loadedPack.bounds.south,loadedPack.bounds.west,loadedPack.bounds.north,loadedPack.bounds.east);}if(previous!=null&&loadedPack!=null&&!loadedPack.id.equals(previousPackId)&&!loadedPack.bounds.contains(previous.target.getLatitude(),previous.target.getLongitude()))focusBounds(loadedPack.bounds.south,loadedPack.bounds.west,loadedPack.bounds.north,loadedPack.bounds.east);cameraInitialised=true;if(pendingGpxFocus)focusGpxRoute();refresh();});});
   }catch(Exception error){main.post(()->{if(disposed||generation!=styleGeneration)return;android.util.Log.e("ConvoyMap","Offline map preparation failed",error);Toast.makeText(getContext(),"Vector map: "+error.getMessage(),Toast.LENGTH_LONG).show();});}});
  }
  private String readAsset(String name)throws IOException{try(InputStream in=getContext().getAssets().open(name);ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[8192];int n;while((n=in.read(b))>0)out.write(b,0,n);return out.toString("UTF-8");}}

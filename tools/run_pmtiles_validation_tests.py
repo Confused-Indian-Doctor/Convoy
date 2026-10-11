@@ -24,6 +24,8 @@ def main():
         subprocess.run([
             "java", "-m", "jdk.compiler/com.sun.tools.javac.Main", "-d", str(classes),
             str(harness), str(ROOT / "tests/PmtilesValidationTest.java"),
+            str(ROOT / "app/src/main/java/com/convoy/offline/PmtilesArchive.java"),
+            str(ROOT / "app/src/main/java/com/convoy/offline/MapPackCatalog.java"),
         ], check=True)
         subprocess.run(["java", "-cp", str(classes), "PmtilesValidationTest"], check=True)
 

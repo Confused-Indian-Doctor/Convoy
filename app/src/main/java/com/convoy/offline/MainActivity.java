@@ -36,7 +36,8 @@ public class MainActivity extends Activity {
  private TextView status,detail,gps,voice,crewSummary,navPrimary,navSecondary,routeSummary,routeTitle;
  private Button trip,ptt,vox,routeAction,instrumentButton;
  private LinearLayout voiceBar;
- private TextView homeGps,homeMap,homeConvoy,homeRoute;
+ private TextView homeGps,homeMap,homeConvoy,homeRoute,mapImportStatus;
+ private long mapImportBytes;
  private final NavigationState navigation=new NavigationState();
  private CurrentLocation location;
  private RouteLibrary routeLibrary;
@@ -332,7 +333,7 @@ public class MainActivity extends Activity {
    for(android.graphics.drawable.Drawable icon:b.getCompoundDrawables())if(icon!=null)icon.setTint(selected?GREEN:MUTED);
    b.setContentDescription(b.getText()+" tab"+(selected?", selected":""));
   }
-  body.removeAllViews();crewPanel=null;homeGps=null;homeMap=null;homeRoute=null;homeConvoy=null;
+  body.removeAllViews();mapImportStatus=null;crewPanel=null;homeGps=null;homeMap=null;homeRoute=null;homeConvoy=null;
   trip.setVisibility(tab==NavigationState.HOME?View.GONE:View.VISIBLE);updateLocationLease();
   updateVoiceVisibility();
   if(tab==NavigationState.MAP){body.addView(mapPanel,new LinearLayout.LayoutParams(-1,-1));requestMapLocation(false);return;}
@@ -495,12 +496,13 @@ public class MainActivity extends Activity {
    try(InputStream input=getContentResolver().openInputStream(uri)){if(input==null)throw new IOException("Could not read that document");entry=routeLibrary.importRoute(input,name);}
    List<RouteLibrary.Entry> routes=routeLibrary.list();GpxRoute route=routeLibrary.load(entry.id);
    runOnUiThread(()->{gpxImporting=false;if(isDestroyed())return;savedRoutes=routes;detailRouteId=entry.id;detailGpx=route;storageReady=true;openScreen(NavigationState.ROUTES);navigation.open(NavigationState.GPX_DETAIL);tab=NavigationState.GPX_DETAIL;renderTab();Toast.makeText(this,"GPX saved offline",Toast.LENGTH_LONG).show();});
-  }catch(Exception e){runOnUiThread(()->{gpxImporting=false;alert("Could not import this GPX file. "+e.getMessage());if(tab==NavigationState.ROUTES)renderTab();});}});
+  }catch(Exception e){runOnUiThread(()->{gpxImporting=false;if(isDestroyed()||isFinishing())return;alert("Could not import this GPX file. "+e.getMessage());if(tab==NavigationState.ROUTES)renderTab();});}});
  }
  private String documentName(Uri uri,String fallback){try(android.database.Cursor cursor=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){if(cursor!=null&&cursor.moveToFirst()){String name=cursor.getString(0);if(name!=null&&!name.trim().isEmpty())return name;}}catch(Exception ignored){}return fallback;}
  private String formatBytes(long bytes){return bytes>=1024L*1024*1024?String.format(Locale.UK,"%.2f GB",bytes/(1024.0*1024*1024)):String.format(Locale.UK,"%.1f MB",bytes/(1024.0*1024));}
  private void renderOfflineMaps(LinearLayout box){
   addSection(box,"Offline Maps","United Kingdom\nInstall compatible PMTiles before travelling. Online downloads are not configured yet; import real files through Android Files.");
+  if(importing){mapImportStatus=text("Importing map • "+formatBytes(mapImportBytes)+" copied",13,AMBER);spaced(box,mapImportStatus,-2);}
   addSection(box,"Storage",formatBytes(mapStorageBytes)+" of imported map packs. The bundled Shrewsbury map is included with the app.");
   android.location.Location fix=location.fix();
   addSection(box,"Data coverage",fix==null?"Waiting for location to check map coverage. Search and routing currently cover the Shrewsbury development region only.":map.getCoverageStatus());
@@ -571,7 +573,8 @@ public class MainActivity extends Activity {
    long fresh=s.members.values().stream().filter(m->m.age()<=15000).count();
    updateText(crewSummary,fresh+" crew · "+s.connectionCount()+" link(s)");
   }else{
-   if((getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)!=0)getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);updateText(trip,"Start trip");
+   boolean localNavigation=tab==NavigationState.MAP&&(followingGpx||(map.getTargetName()!=null&&!map.getTargetName().isEmpty()));
+   if(localNavigation)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else if((getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)!=0)getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);updateText(trip,"Start trip");
    updateText(status,hadTrip?"Trip ended · map stays offline":"Offline. Together.");
    updateText(detail,"No mobile signal needed. Set up together before driving.");
    updateText(voice,"Local voice · start a trip");updateText(gps,location.snapshot().statusText());
@@ -701,93 +704,30 @@ public class MainActivity extends Activity {
   EditText input=new EditText(this);input.setTextColor(TEXT);input.setHintTextColor(MUTED);input.setHint("Paste CONVOY_PLAN_V1 text here");input.setMinLines(8);input.setGravity(Gravity.TOP);input.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE|android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);input.setPadding(dp(14),dp(10),dp(14),dp(10));try{ClipboardManager cm=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE);if(cm!=null&&cm.hasPrimaryClip()&&cm.getPrimaryClip()!=null&&cm.getPrimaryClip().getItemCount()>0){CharSequence c=cm.getPrimaryClip().getItemAt(0).coerceToText(this);if(c!=null&&c.toString().contains(TripPlan.HEADER))input.setText(c);}}catch(Exception ignored){}
   FrameLayout wrap=new FrameLayout(this);wrap.setPadding(dp(18),0,dp(18),0);wrap.addView(input,new FrameLayout.LayoutParams(-1,dp(260)));AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Import shared trip plan").setMessage("This replaces the plan saved on this phone.").setView(wrap).setNegativeButton("Cancel",null).setPositiveButton("Import",null).create();dialog.setOnShowListener(d->dialog.getButton(-1).setOnClickListener(v->{ArrayList<TripPlan.Waypoint> points=TripPlan.decode(input.getText().toString());if(points.isEmpty()){input.setError("No valid Convoy stops found");return;}TripPlan.save(this,points);refreshPlan();dialog.dismiss();renderTab();Toast.makeText(this,points.size()+" stops imported",Toast.LENGTH_LONG).show();}));dialog.show();
  }
- private void chooseMap(){if(importing){alert("A map is already being imported.");return;}new AlertDialog.Builder(this).setTitle("Offline vector map pack").setMessage("Convoy already includes a rich Shrewsbury vector map with roads, buildings, place names and POIs.\n\nYou can replace the basemap with another Protomaps-compatible PMTiles (.pmtiles) file. The bundled Shrewsbury place-search and routing data remain tied to the Shrewsbury region in this build.").setNegativeButton("Cancel",null).setPositiveButton("Choose PMTiles",(d,w)->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(i,9);}).show();}
+ private void chooseMap(){openScreen(NavigationState.OFFLINE_MAPS);}
  @Override protected void onActivityResult(int req,int result,Intent data){
   super.onActivityResult(req,result,data);
-  if(req!=9||result!=RESULT_OK||data==null||importing)return;
-  Uri uri=data.getData();if(uri==null)return;
-  importing=true;Toast.makeText(this,"Importing vector map…",Toast.LENGTH_LONG).show();
-  new Thread(()->{
-   File temporary=new File(getFilesDir(),"region-import.pmtiles");
+  if(result!=RESULT_OK||data==null||data.getData()==null)return;
+  Uri uri=data.getData();
+  if(req==10){if(!gpxImporting)importGpx(uri);return;}
+  if(req!=9||importing)return;
+  final String region=pendingMapRegion,replacement=pendingMapReplacement;
+  importing=true;mapImportBytes=0;if(tab==NavigationState.OFFLINE_MAPS)renderTab();
+  Toast.makeText(this,"Importing vector map…",Toast.LENGTH_LONG).show();
+  storageWorker.execute(()->{
    try{
-    String title="Imported vector region";
-    try(android.database.Cursor cursor=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){
-     if(cursor!=null&&cursor.moveToFirst()){
-      String name=cursor.getString(0);if(name!=null&&!name.trim().isEmpty())title=name;
-     }
+    String name=documentName(uri,"Imported vector map");final long[] lastProgress={0};
+    MapPackStore.Progress progress=bytes->{long now=SystemClock.elapsedRealtime();if(now-lastProgress[0]<500)return;lastProgress[0]=now;runOnUiThread(()->{mapImportBytes=bytes;if(mapImportStatus!=null)updateText(mapImportStatus,"Importing map • "+formatBytes(bytes)+" copied");});};
+    try(InputStream input=getContentResolver().openInputStream(uri)){
+     if(input==null)throw new IOException("Could not read that document");
+     if(replacement==null)mapPacks.importPack(input,name,region,progress);else mapPacks.replacePack(input,name,replacement,progress);
     }
-    try(InputStream input=getContentResolver().openInputStream(uri);FileOutputStream output=new FileOutputStream(temporary)){
-     if(input==null)throw new IOException("Could not read that file");
-     byte[] buffer=new byte[65536];long total=0;int count;
-     while((count=input.read(buffer))!=-1){
-      total+=count;if(total>2L*1024*1024*1024)throw new IOException("Use a map pack no larger than 2 GB");
-      output.write(buffer,0,count);
-     }
-     output.getFD().sync();
-    }
-    validatePmtiles(temporary);
-    File target=new File(getFilesDir(),"region.pmtiles");
-    // Both files live in the same private directory. Atomic replacement keeps the old pack intact on failure.
-    try{
-     java.nio.file.Files.move(temporary.toPath(),target.toPath(),
-             java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-    }catch(java.nio.file.AtomicMoveNotSupportedException e){
-     throw new IOException("This device could not safely replace the map pack. Your existing map is still available.",e);
-    }
-    String finalTitle=title;
-    runOnUiThread(()->{
-     importing=false;getSharedPreferences("convoy",0).edit().putString("mapName",finalTitle).apply();
-     if(!isFinishing()&&!isDestroyed()){
-      map.load();map.recenter();Toast.makeText(this,"Vector map ready",Toast.LENGTH_LONG).show();
-     }
-    });
-   }catch(Exception e){
-    temporary.delete();
-    runOnUiThread(()->{importing=false;alert("Map import failed: "+e.getMessage());});
-   }
-  },"map-import").start();
+    runOnUiThread(()->{importing=false;if(isDestroyed()||isFinishing())return;map.reloadSelectedMap();Toast.makeText(this,"Offline map installed",Toast.LENGTH_LONG).show();});
+    refreshStoredData();
+   }catch(Exception error){runOnUiThread(()->{importing=false;if(isDestroyed()||isFinishing())return;alert("Map import failed. "+error.getMessage());if(tab==NavigationState.OFFLINE_MAPS)renderTab();});}
+  });
  }
- private void validatePmtiles(File file)throws IOException{
-  final int headerSize=127;long fileSize=file.length();
-  if(fileSize<headerSize)throw new IOException("The PMTiles header is incomplete");
-  byte[] header=new byte[headerSize];
-  try(DataInputStream input=new DataInputStream(new BufferedInputStream(new FileInputStream(file)))){
-   input.readFully(header);
-  }
-  if(!"PMTiles".equals(new String(header,0,7,java.nio.charset.StandardCharsets.US_ASCII)))
-   throw new IOException("That file is not a PMTiles archive");
-  if((header[7]&255)!=3)throw new IOException("Use a PMTiles version 3 archive");
-  java.nio.ByteBuffer fields=java.nio.ByteBuffer.wrap(header).order(java.nio.ByteOrder.LITTLE_ENDIAN);
-  String[] sectionNames={"root directory","metadata","leaf directories","tile data"};
-  long[][] sections=new long[4][2];
-  for(int i=0;i<sections.length;i++){
-   long offset=fields.getLong(8+i*16),length=fields.getLong(16+i*16);
-   // Subtraction keeps malformed unsigned 64-bit offsets/lengths from wrapping past the file limit.
-   if(offset<0||length<0||offset>fileSize||length>fileSize-offset||
-           (length>0&&offset<headerSize))throw new IOException("Invalid PMTiles "+sectionNames[i]+" range");
-   sections[i][0]=offset;sections[i][1]=length;
-  }
-  if(sections[0][1]==0||sections[3][1]==0)throw new IOException("The PMTiles archive has no map tiles");
-  for(int i=0;i<sections.length;i++)for(int j=i+1;j<sections.length;j++){
-   if(sections[i][1]>0&&sections[j][1]>0&&
-           sections[i][0]<sections[j][0]+sections[j][1]&&sections[j][0]<sections[i][0]+sections[i][1])
-    throw new IOException("PMTiles data sections overlap");
-  }
-  long addressedTiles=fields.getLong(72),tileEntries=fields.getLong(80),tileContents=fields.getLong(88);
-  if(addressedTiles<=0||tileEntries<=0||tileContents<=0||tileEntries>addressedTiles||tileContents>tileEntries)
-   throw new IOException("Invalid PMTiles tile counts");
-  int clustered=header[96]&255,internalCompression=header[97]&255,tileCompression=header[98]&255;
-  if(clustered>1||internalCompression<1||internalCompression>4||tileCompression<1||tileCompression>4)
-   throw new IOException("Invalid PMTiles compression or clustering flags");
-  if((header[99]&255)!=1)throw new IOException("Choose a vector MVT PMTiles pack for Convoy’s basemap");
-  int minZoom=header[100]&255,maxZoom=header[101]&255,centerZoom=header[118]&255;
-  if(minZoom>maxZoom||maxZoom>31||centerZoom>31)throw new IOException("Invalid PMTiles zoom levels");
-  int minLon=fields.getInt(102),minLat=fields.getInt(106),maxLon=fields.getInt(110),maxLat=fields.getInt(114);
-  int centerLon=fields.getInt(119),centerLat=fields.getInt(123);
-  if(minLon< -1800000000||maxLon>1800000000||minLat< -900000000||maxLat>900000000||
-          minLon>maxLon||minLat>maxLat||centerLon< -1800000000||centerLon>1800000000||
-          centerLat< -900000000||centerLat>900000000)throw new IOException("Invalid PMTiles geographic bounds");
- }
+ private void validatePmtiles(File file)throws IOException{com.convoy.offline.PmtilesArchive.validate(file);}
  private void searchPlaces(){final EditText q=new EditText(this);q.setSingleLine(true);q.setTextColor(TEXT);q.setHintTextColor(MUTED);q.setHint("fuel, cafe, supermarket, castle…");q.setPadding(dp(14),0,dp(14),0);AlertDialog d=new AlertDialog.Builder(this).setTitle("Search offline places").setMessage("Search the Shrewsbury place index stored on this phone.").setView(q).setNegativeButton("Cancel",null).setPositiveButton("Search",null).create();d.setOnShowListener(x->d.getButton(-1).setOnClickListener(v->{String s=q.getText().toString().trim();if(s.length()<2){q.setError("Type at least two characters");return;}d.dismiss();map.search(s,this::showSearchResults);}));d.show();}
  private void showSearchResults(ArrayList<PlaceInfo> places){if(places==null||places.isEmpty()){alert("No matching places were found in the offline Shrewsbury index.");return;}String[] labels=new String[places.size()];for(int i=0;i<places.size();i++){PlaceInfo p=places.get(i);String sub=p.subtitle();labels[i]=p.name+(sub.isEmpty()?"":"\n"+sub);}new AlertDialog.Builder(this).setTitle("Offline places").setItems(labels,(d,w)->{PlaceInfo p=places.get(w);map.focus(p.lat,p.lon);placeSheet(p);}).setNegativeButton("Close",null).show();}
  private void placeSheet(PlaceInfo p){if(p==null)return;StringBuilder b=new StringBuilder();if(p.category!=null&&!p.category.isEmpty())b.append(p.category.replace('_',' '));android.location.Location localFix=location.fix();if(localFix!=null){float[] d=new float[1];android.location.Location.distanceBetween(localFix.getLatitude(),localFix.getLongitude(),p.lat,p.lon,d);b.append(b.length()>0?" • ":"").append(formatDistance(d[0])).append(" away");}if(p.address!=null&&!p.address.isEmpty())b.append(b.length()>0?"\n":"").append(p.address);if(p.brand!=null&&!p.brand.isEmpty()&&!p.brand.equalsIgnoreCase(p.name))b.append("\nBrand: ").append(p.brand);if(p.cuisine!=null&&!p.cuisine.isEmpty())b.append("\nCuisine: ").append(p.cuisine.replace(';',','));if(p.operator!=null&&!p.operator.isEmpty())b.append("\nOperator: ").append(p.operator);if(p.openingHours!=null&&!p.openingHours.isEmpty())b.append("\nHours: ").append(p.openingHours);if(p.wheelchair!=null&&!p.wheelchair.isEmpty())b.append("\nWheelchair: ").append(p.wheelchair);if(p.internetAccess!=null&&!p.internetAccess.isEmpty())b.append("\nInternet: ").append(p.internetAccess);if(p.phone!=null&&!p.phone.isEmpty())b.append("\nPhone: ").append(p.phone);if(p.website!=null&&!p.website.isEmpty())b.append("\nWeb: ").append(p.website);if(p.source!=null&&!p.source.isEmpty())b.append("\n\nData: ").append(p.source);showPlaceDetails(p,b.length()==0?String.format(Locale.UK,"%.5f, %.5f",p.lat,p.lon):b.toString());}

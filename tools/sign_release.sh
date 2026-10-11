@@ -25,6 +25,15 @@ fi
   --ks "$key_path" --ks-key-alias "$CONVOY_KEY_ALIAS" \
   --ks-pass env:CONVOY_KEYSTORE_PASSWORD --key-pass env:CONVOY_KEY_PASSWORD \
   --out "$output" "$input"
-"$sdk/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$output"
+verification="$("$sdk/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$output")"
+printf '%s\n' "$verification"
+# Public certificate fingerprint of the existing Convoy 0.4.2 identity; no private material.
+expected_signer=b5edfcc256feb46edc9fa4f2c4e95aeae3a8572b248ef234ba2a61b4eaefc308
+actual_signer="$(printf '%s\n' "$verification" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+if [[ "$actual_signer" != "$expected_signer" ]]; then
+  rm -f "$output"
+  echo 'The supplied key does not match the existing Convoy signing identity.' >&2
+  exit 1
+fi
 "$sdk/build-tools/35.0.0/zipalign" -c -P 16 4 "$output"
 sha256sum "$output"

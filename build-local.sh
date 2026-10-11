@@ -26,7 +26,7 @@ if [[ "$skip_tests" == false ]]; then
   bash tools/run_protocol_tests.sh
   bash tools/run_local_tiles_tests.sh
   bash tools/run_gpx_tests.sh
-  bash tools/run_map_pack_tests.sh
+  bash tools/run_map_pack_tests.sh app/src/main/assets/shrewsbury.pmtiles app/src/main/assets/overture-shrewsbury.pmtiles
   bash tools/run_location_tests.sh
   bash tools/run_navigation_tests.sh
   bash tools/run_trip_plan_tests.sh

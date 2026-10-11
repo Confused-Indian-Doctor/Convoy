@@ -22,6 +22,7 @@ public final class MapPackTest {
  store.remove(imported.id);check(store.selected().bundled,"removing selected map restores bundled map");
  try{new MapPackStore(root,100).importPack(new ByteArrayInputStream(fixture()),"huge","custom");throw new AssertionError();}catch(IOException expected){check(store.selected().bundled,"oversize map preserves catalog");}
  Files.write(new File(root,"region.pmtiles").toPath(),fixture());store.migrateLegacy("old map");check(store.selected().installed&&!new File(root,"region.pmtiles").exists(),"legacy custom map migration");
- check(store.storageBytes()>=136,"storage reflects actual files");System.out.println("TOTAL "+checks+" map-pack checks passed");
+ check(store.storageBytes()>=136,"storage reflects actual files");
+ for(String path:args){PmtilesArchive.Info real=PmtilesArchive.validate(new File(path));check(real.bytes>136,"real bundled PMTiles validates: "+new File(path).getName());}System.out.println("TOTAL "+checks+" map-pack checks passed");
  }
 }
