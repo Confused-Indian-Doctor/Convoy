@@ -170,7 +170,7 @@ for node in nodes:
         or (mode == "edit_text" and node is first_edit and re.sub(r"\s+", "", text).casefold() == value.casefold())
         or (mode == "prefix" and text.startswith(value))
         or (mode == "hotspot" and attrs.get("class") == "android.widget.CheckBox" and text == value)
-        or (mode == "gps" and text.startswith("GPS ·"))
+        or (mode == "gps" and (text.startswith("GPS ·") or text.startswith("GPS •")))
         or (mode == "eta" and re.fullmatch(r"\d+ min|\d+ h \d+ min", text))
         or (mode == "scroll" and attrs.get("class") == "android.widget.ScrollView")
     )
@@ -391,6 +391,38 @@ dump_ui
 adb exec-out screencap -p > build/smoke/offline-startup.png
 cp "$private_dir/ui.xml" build/smoke/ui.xml
 adb shell dumpsys package com.convoy.offline > build/smoke/package.txt
+
+# Dashboard navigation and local map GPS must work before any convoy exists.
+wait_control text 'Your driving dashboard' 'Home dashboard' >/dev/null
+wait_service stopped
+tap_control text Map 'Map destination'
+adb shell cmd location set-location-enabled true
+adb emu geo fix -2.7541 52.7078 >/dev/null
+keep_gps_fresh=true
+wait_control gps '' 'map-only GPS fix' >/dev/null
+wait_service stopped
+adb shell input keyevent 4
+wait_control text 'Your driving dashboard' 'Back Map to Home' >/dev/null
+tap_control text Routes 'Routes destination'
+wait_control text 'Import GPX' 'GPX import button' >/dev/null
+tap_control text 'Import GPX' 'system GPX picker'
+sleep 2
+adb shell dumpsys activity activities > "$private_dir/picker.txt"
+grep -Eiq 'documentsui|DocumentsActivity' "$private_dir/picker.txt" || { echo 'GPX document picker did not open.' >&2; exit 1; }
+adb shell input keyevent 4
+wait_control text 'Import GPX' 'Routes restored after picker' >/dev/null
+adb shell input keyevent 4
+wait_control text 'Your driving dashboard' 'Back Routes to Home' >/dev/null
+tap_control text Crew 'Crew destination'
+wait_service stopped
+adb shell input keyevent 4
+wait_control text 'Your driving dashboard' 'Back Crew to Home' >/dev/null
+adb shell input keyevent 4
+sleep 1
+adb shell am start -W -n com.convoy.offline/.MainActivity >/dev/null
+wait_control text 'Your driving dashboard' 'Home restored after normal Back' >/dev/null
+printf 'PASS Home, map-only GPS, document picker and main-screen Back.\n' > build/smoke/home-navigation.txt
+tap_control text Map 'Map before convoy setup'
 
 # Start through the activity: the service intentionally cannot be started by adb.
 adb shell cmd location set-location-enabled true

@@ -8,18 +8,18 @@ import java.util.*;
 public final class RouteLibrary {
  private final File root, directory;
  public static final class Entry {
-  public final String id,name; public final double totalMeters; public final int segmentCount;
-  Entry(String id,String name,double meters,int segments){this.id=id;this.name=name;totalMeters=meters;segmentCount=segments;}
+  public final String id,name; public final double totalMeters; public final int segmentCount,pointCount,waypointCount;
+  Entry(String id,String name,double meters,int segments,int points,int waypoints){this.id=id;this.name=name;totalMeters=meters;segmentCount=segments;pointCount=points;waypointCount=waypoints;}
  }
  public RouteLibrary(File filesRoot){root=filesRoot;directory=new File(root,"routes");}
  private File file(String id,String suffix)throws IOException{if(id==null||!id.matches("[0-9a-f-]{36}"))throw new IOException("Invalid route identifier");return new File(directory,id+suffix);}
  private void ensure()throws IOException{if(!directory.isDirectory()&&!directory.mkdirs())throw new IOException("Route storage unavailable");}
  private static Properties read(File file)throws IOException{Properties p=new Properties();if(file.isFile())try(InputStream in=new FileInputStream(file)){p.load(in);}return p;}
  private static void write(File file,Properties p)throws IOException{File temporary=new File(file.getPath()+".tmp");try(FileOutputStream out=new FileOutputStream(temporary)){p.store(out,"Convoy route metadata");out.getFD().sync();}try{Files.move(temporary.toPath(),file.toPath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);}catch(AtomicMoveNotSupportedException e){Files.move(temporary.toPath(),file.toPath(),StandardCopyOption.REPLACE_EXISTING);}}
- private Entry entry(String id)throws IOException{Properties p=read(file(id,".properties"));try{return new Entry(id,p.getProperty("name","Imported GPX route"),Double.parseDouble(p.getProperty("meters","0")),Integer.parseInt(p.getProperty("segments","0")));}catch(RuntimeException e){throw new IOException("Corrupt route metadata",e);}}
+ private Entry entry(String id)throws IOException{Properties p=read(file(id,".properties"));try{return new Entry(id,p.getProperty("name","Imported GPX route"),Double.parseDouble(p.getProperty("meters","0")),Integer.parseInt(p.getProperty("segments","0")),Integer.parseInt(p.getProperty("points","0")),Integer.parseInt(p.getProperty("waypoints","0")));}catch(RuntimeException e){throw new IOException("Corrupt route metadata",e);}}
  public synchronized Entry importRoute(InputStream input,String fallback)throws IOException{
   ensure();byte[] bytes=GpxParser.readBounded(input);GpxRoute route=GpxParser.parse(new ByteArrayInputStream(bytes),fallback);String id=UUID.randomUUID().toString();File original=file(id,".gpx"),temp=file(id,".gpx.tmp");
-  try{try(FileOutputStream out=new FileOutputStream(temp)){out.write(bytes);out.getFD().sync();}Files.move(temp.toPath(),original.toPath(),StandardCopyOption.ATOMIC_MOVE);Properties p=new Properties();p.setProperty("name",route.name);p.setProperty("meters",Double.toString(route.totalMeters));p.setProperty("segments",Integer.toString(route.segments.size()));write(file(id,".properties"),p);return entry(id);}catch(IOException e){temp.delete();original.delete();file(id,".properties").delete();throw e;}
+  try{try(FileOutputStream out=new FileOutputStream(temp)){out.write(bytes);out.getFD().sync();}Files.move(temp.toPath(),original.toPath(),StandardCopyOption.ATOMIC_MOVE);Properties p=new Properties();p.setProperty("name",route.name);p.setProperty("meters",Double.toString(route.totalMeters));p.setProperty("segments",Integer.toString(route.segments.size()));p.setProperty("points",Integer.toString(route.pointCount));p.setProperty("waypoints",Integer.toString(route.waypoints.size()));write(file(id,".properties"),p);return entry(id);}catch(IOException e){temp.delete();original.delete();file(id,".properties").delete();throw e;}
  }
  public synchronized List<Entry> list()throws IOException{
   ensure();migrate();List<Entry> entries=new ArrayList<>();File[] files=directory.listFiles();if(files==null)throw new IOException("Route storage unavailable");for(File f:files)if(f.getName().matches("[0-9a-f-]{36}\\.properties")){String id=f.getName().substring(0,36);if(file(id,".gpx").isFile())try{entries.add(entry(id));}catch(IOException ignored){}}entries.sort(Comparator.comparing(e->e.name.toLowerCase(Locale.ROOT)));return entries;

@@ -1,12 +1,12 @@
 <resources>
-    <style name="ConvoyBaseTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="ConvoyBaseTheme" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">#1764E8</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:statusBarColor">#F4F7FB</item>
-        <item name="android:navigationBarColor">#FFFFFF</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#101820</item>
+        <item name="android:navigationBarColor">#101820</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:windowBackground">#F4F7FB</item>
+        <item name="android:windowBackground">#101820</item>
         <item name="android:windowSoftInputMode">adjustResize</item>
     </style>
     <style name="AppTheme" parent="ConvoyBaseTheme" />

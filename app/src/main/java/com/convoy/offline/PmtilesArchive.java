@@ -24,6 +24,17 @@ public final class PmtilesArchive {
         }
     }
 
+    /** Small header read for already validated, immutable installed files. */
+    public static Info readHeader(File file) throws IOException {
+        if(!file.isFile()||file.length()<HEADER_SIZE)throw new IOException("Incomplete PMTiles");
+        byte[] header=new byte[HEADER_SIZE];try(DataInputStream input=new DataInputStream(new FileInputStream(file))){input.readFully(header);}
+        if(!"PMTiles".equals(new String(header,0,7,StandardCharsets.US_ASCII))||header[7]!=3||header[99]!=1)throw new IOException("Invalid installed PMTiles header");
+        ByteBuffer fields=ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN);
+        double west=fields.getInt(102)/1e7,south=fields.getInt(106)/1e7,east=fields.getInt(110)/1e7,north=fields.getInt(114)/1e7;
+        if(west< -180||east>180||south< -90||north>90||west>east||south>north)throw new IOException("Invalid installed bounds");
+        return new Info(file.length(),new MapPackCatalog.Bounds(south,west,north,east),header[100]&255,header[101]&255);
+    }
+
     public static Info validate(File file) throws IOException {
         long fileSize = file.length();
         if (!file.isFile() || fileSize < HEADER_SIZE) throw new IOException("The PMTiles header is incomplete");

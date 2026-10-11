@@ -47,6 +47,7 @@ jobs:
           bash tools/run_protocol_tests.sh
           bash tools/run_local_tiles_tests.sh
           bash tools/run_gpx_tests.sh
+          bash tools/run_map_pack_tests.sh
           bash tools/run_location_tests.sh
           bash tools/run_navigation_tests.sh
           bash tools/run_trip_plan_tests.sh
@@ -99,6 +100,8 @@ jobs:
           zip -q -j build/transfer/release.zip \
             "build/release/Convoy-${CONVOY_VERSION}-aligned-unsigned.apk" \
             "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar"
+          zip -q -j build/transfer/debug.zip app/build/outputs/apk/debug/app-debug.apk
+          split -b 30M build/transfer/debug.zip build/transfer/debug.part-
           split -b 30M build/transfer/release.zip build/transfer/release.part-
           sha256sum build/transfer/release.zip > build/transfer/release.sha256
 
@@ -125,6 +128,34 @@ jobs:
           path: build/transfer/release.part-ad
           if-no-files-found: ignore
           retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Convoy-debug-transfer-aa
+          path: build/transfer/debug.part-aa
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Convoy-debug-transfer-ab
+          path: build/transfer/debug.part-ab
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Convoy-debug-transfer-ac
+          path: build/transfer/debug.part-ac
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Convoy-debug-transfer-ad
+          path: build/transfer/debug.part-ad
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Sign release with the existing private Convoy identity
         env:
