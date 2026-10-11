@@ -6,6 +6,7 @@
     "basemap": {"type":"vector","url":"__BASEMAP_URI__","attribution":"© OpenStreetMap contributors"},
     "overture": {"type":"vector","url":"__PLACES_URI__","attribution":"© Overture Maps Foundation"},
     "route": {"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
+    "gpx": {"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
     "trip": {"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
     "waypoints": {"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
     "crew": {"type":"geojson","data":{"type":"FeatureCollection","features":[]}},
@@ -45,6 +46,8 @@
     {"id":"overture-place-label","type":"symbol","source":"overture","source-layer":"place","minzoom":16.5,"filter":["has","@name"],"layout":{"text-field":["get","@name"],"text-font":["Noto Sans Regular"],"text-size":9,"text-offset":[0,0.9],"text-anchor":"top"},"paint":{"text-color":"#4d5a60","text-halo-color":"#ffffff","text-halo-width":1.3}},
 
     {"id":"trip-line","type":"line","source":"trip","paint":{"line-color":"#7d8b92","line-width":2.0,"line-dasharray":[2,2],"line-opacity":0.75}},
+    {"id":"gpx-casing","type":"line","source":"gpx","layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":"#ffffff","line-width":["interpolate",["linear"],["zoom"],7,4,16,10],"line-opacity":0.95}},
+    {"id":"gpx-line","type":"line","source":"gpx","layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":"#e55b2d","line-width":["interpolate",["linear"],["zoom"],7,2.5,16,6.5],"line-opacity":0.95}},
     {"id":"route-casing","type":"line","source":"route","layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":"#ffffff","line-width":["interpolate",["linear"],["zoom"],10,6,16,13],"line-opacity":0.9}},
     {"id":"route-line","type":"line","source":"route","layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":"#1677ff","line-width":["interpolate",["linear"],["zoom"],10,4,16,9],"line-opacity":0.95}},
     {"id":"waypoint-dot","type":"circle","source":"waypoints","paint":{"circle-radius":8,"circle-color":"#006e4a","circle-stroke-color":"#ffffff","circle-stroke-width":2}},
