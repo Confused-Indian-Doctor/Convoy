@@ -463,6 +463,9 @@ wait_control text 'End trip' 'active trip button' >/dev/null
 setup_open=false
 assert_running trip-started
 printf 'PASS trip entered a foreground service through the UI.\n' > build/smoke/service-start.txt
+adb shell input keyevent 4
+wait_control text 'Your driving dashboard' 'Back from host Crew to Home' >/dev/null
+wait_service started
 
 tap_control text Map 'Map tab'
 adb emu geo fix -2.7541 52.7078 >/dev/null

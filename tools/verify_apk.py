@@ -2,6 +2,7 @@
 """Check the release includes its offline data and MapLibre native runtime."""
 from pathlib import Path
 import gzip
+import hashlib
 import json
 import sqlite3
 import struct
@@ -61,8 +62,10 @@ with ZipFile(apk) as z:
     assert "gpx" in style["sources"] and "gpx-waypoints" in style["sources"], "GPX layers missing"
     layers = {layer["id"]: layer for layer in style["layers"]}
     assert any(layer.get("source") == "gpx" and layer["type"] == "line" for layer in layers.values()), "GPX line missing"
+    vehicle_hashes = {hashlib.sha256(z.read(name)).hexdigest() for name in z.namelist() if name.endswith(".webp")}
     for car in ("nc", "gt86", "r34", "supra", "nsx", "gc8", "evo6", "ae86", "350z", "na", "generic"):
-        assert any(name.endswith("/car_" + car + ".webp") for name in z.namelist()), "Missing vehicle icon: " + car
+        source = Path(__file__).resolve().parents[1] / "app/src/main/res/drawable-nodpi" / ("car_" + car + ".webp")
+        assert hashlib.sha256(source.read_bytes()).hexdigest() in vehicle_hashes, "Missing or modified vehicle icon: " + car
     print("PASS GPX sources, line layers and eleven existing vehicle icons")
     native = [name for name in z.namelist() if name.startswith("lib/") and "maplibre" in name and name.endswith(".so")]
     assert native, "MapLibre native runtime missing"
