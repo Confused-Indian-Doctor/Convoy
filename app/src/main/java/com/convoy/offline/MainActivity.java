@@ -434,7 +434,7 @@ public class MainActivity extends Activity {
   if(homeGps!=null)updateText(homeGps,location.snapshot().statusText());
   if(homeMap!=null)updateText(homeMap,"Offline map • "+selectedMapName());
   ConvoyService s=ConvoyService.current;
-  if(homeConvoy!=null)updateText(homeConvoy,s==null||!s.active?"Local mode • your location stays on this phone":s.sessionTitle()+" • "+s.driverCount()+" driver(s) connected");
+  if(homeConvoy!=null)updateText(homeConvoy,s==null||!s.active?"Local mode • your location stays on this phone":s.sessionTitle()+" • "+(!s.host&&s.connectionCount()==0?"Connecting on local Wi-Fi…":s.driverCount()+" driver(s) connected"));
   if(homeRoute!=null&&activeGpx!=null){GpxRoute.Progress p=map.getGpxProgress();updateText(homeRoute,activeGpx.name+"\n"+(followingGpx?"Following GPX track":"Saved route ready")+(p==null?" • "+formatDistance((float)activeGpx.totalMeters):" • "+formatDistance((float)p.remainingMeters)+" remaining"));}
  }
  private String selectedMapName(){android.location.Location fix=location.fix();if(fix!=null)for(MapPack pack:installedMaps)if(!pack.bundled&&pack.covers(fix.getLatitude(),fix.getLongitude()))return pack.name;for(MapPack pack:installedMaps)if(pack.selected&&!pack.bundled)return pack.name;ArrayList<String> names=new ArrayList<>();for(MapPack pack:installedMaps)if(pack.installed&&!pack.bundled)names.add(pack.name);return names.isEmpty()?"UK region not downloaded":names.size()==1?names.get(0):names.size()+" installed map packs";}
@@ -551,7 +551,7 @@ public class MainActivity extends Activity {
   if(s==null){
    rows.add("Your crew appears here");rows.add("Start or join a trip to share positions.");
   }else{
-   rows.add(s.myName+" • you");rows.add((s.host?"Host":"Member")+" • "+s.driverCount()+" driver(s) • encrypted local convoy");
+   rows.add(s.myName+" • you");rows.add((s.host?"Host":"Member")+" • "+s.status+"\n"+s.driverCount()+" driver(s) • "+(s.connectionCount()>0||s.host?"Encrypted local convoy":"Waiting for an authenticated host connection"));
    ArrayList<ConvoyService.Member> list=new ArrayList<>(s.members.values());list.sort(Comparator.comparing(m->m.name));
    for(ConvoyService.Member m:list){
     long seen=Math.max(0,(SystemClock.elapsedRealtime()-m.received)/1000);

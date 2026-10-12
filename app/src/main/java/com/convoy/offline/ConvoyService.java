@@ -39,7 +39,7 @@ private final CopyOnWriteArrayList<Link> links=new CopyOnWriteArrayList<>();
  private volatile long lastSound=0;private volatile String speakerId="";private volatile long speakerUntil=0;
  private AudioManager audioManager;private AudioFocusRequest focusRequest;private volatile boolean audioFocused=true;
  public int connectionCount(){return links.size();}
- public int driverCount(){if(host)return 1+links.size();long now=SystemClock.elapsedRealtime();return 1+(int)members.values().stream().filter(m->now-m.received<=10000).count();}
+ public int driverCount(){if(host)return 1+links.size();long now=SystemClock.elapsedRealtime();return Math.max(1+links.size(),1+(int)members.values().stream().filter(m->now-m.received<=10000).count());}
  @Override public IBinder onBind(Intent i){return null;}
  @Override public int onStartCommand(Intent intent,int flags,int startId){
   if(intent!=null&&"STOP".equals(intent.getAction())){stopSelf();return START_NOT_STICKY;}
@@ -140,10 +140,12 @@ private final CopyOnWriteArrayList<Link> links=new CopyOnWriteArrayList<>();
   try{s.connect();return s;}catch(Exception e){pending.remove(s);closeSocket(s);throw e;}
   finally{main.removeCallbacks(timeout);}
  }
+ /** Older NSD APIs do not identify the network: explicitly bind LAN traffic, never the cellular default. */
+ private Network localWifiNetwork(InetAddress hostAddress){ConnectivityManager cm=getSystemService(ConnectivityManager.class);Network fallback=null;for(Network network:cm.getAllNetworks()){NetworkCapabilities capabilities=cm.getNetworkCapabilities(network);if(capabilities==null||!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))continue;if(fallback==null)fallback=network;LinkProperties properties=cm.getLinkProperties(network);if(properties!=null)for(RouteInfo route:properties.getRoutes())if(route.getDestination().getPrefixLength()>0&&route.getDestination().contains(hostAddress))return network;}return fallback;}
  private void joinLoop(){while(active){Closeable socket=null;try{
   status="Connecting to host…";
   if(bluetooth)socket=openBluetoothConnection();
-  else{Socket s=new Socket();socket=s;pending.add(s);if(consumer){LanDiscovery.Endpoint target=endpoint;if(target==null){status="Finding convoy on local Wi-Fi…";throw new IOException("Host discovery pending");}Network n=bootstrap!=null?bootstrap.network():target.network;if(n!=null)n.bindSocket(s);s.connect(new InetSocketAddress(target.host,target.port),7000);}else{ConnectivityManager cm=getSystemService(ConnectivityManager.class);for(Network n:cm.getAllNetworks()){NetworkCapabilities c=cm.getNetworkCapabilities(n);if(c!=null&&c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)){n.bindSocket(s);break;}}s.connect(new InetSocketAddress(address,Wire.PORT),7000);}s.setTcpNoDelay(true);s.setSoTimeout(12000);}
+  else{Socket s=new Socket();socket=s;pending.add(s);if(consumer){LanDiscovery.Endpoint target=endpoint;if(target==null){status="Finding convoy on local Wi-Fi…";throw new IOException("Host discovery pending");}Network n=bootstrap!=null?bootstrap.network():target.network;if(n==null)n=localWifiNetwork(target.host);if(n==null)throw new IOException("Local Wi-Fi connection required");n.bindSocket(s);s.connect(new InetSocketAddress(target.host,target.port),7000);}else{ConnectivityManager cm=getSystemService(ConnectivityManager.class);for(Network n:cm.getAllNetworks()){NetworkCapabilities c=cm.getNetworkCapabilities(n);if(c!=null&&c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)){n.bindSocket(s);break;}}s.connect(new InetSocketAddress(address,Wire.PORT),7000);}s.setTcpNoDelay(true);s.setSoTimeout(12000);}
   if(active)connect(socket,false);
  }catch(Exception e){if(active){status=consumer&&endpoint==null?"Finding convoy on local Wi-Fi…":"Disconnected • retrying";detail=consumer?"Keep the same local Wi-Fi connection. Waiting for the convoy host.":message(e)+". Check range, host and group key.";if(consumer&&discovery!=null)main.post(discovery::rediscover);}}
  finally{if(socket!=null){pending.remove(socket);closeSocket(socket);}}
