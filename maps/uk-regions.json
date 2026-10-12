@@ -1,0 +1,8 @@
+{"schema_version":1,"country_id":"uk","regions":[
+{"id":"uk-scotland","region_id":"scotland","name":"Scotland","bounds":[-8.8,54.6,-0.5,61.0],"max_zoom":13},
+{"id":"uk-north-england","region_id":"north-england","name":"Northern England","bounds":[-5.0,52.75,0.6,55.85],"max_zoom":13},
+{"id":"uk-south-england","region_id":"south-england","name":"Southern England","bounds":[-6.5,49.8,1.9,52.95],"max_zoom":13},
+{"id":"uk-wales","region_id":"wales","name":"Wales","bounds":[-5.6,51.3,-2.5,53.6],"max_zoom":13},
+{"id":"uk-northern-ireland","region_id":"northern-ireland","name":"Northern Ireland","bounds":[-8.3,54.0,-5.3,55.5],"max_zoom":13},
+{"id":"uk-overview","region_id":"overview","name":"United Kingdom overview","bounds":[-8.8,49.8,1.9,61.0],"max_zoom":7}
+]}

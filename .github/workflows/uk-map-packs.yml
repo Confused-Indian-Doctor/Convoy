@@ -1,0 +1,127 @@
+name: Build and publish UK offline map packs
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_url:
+        description: 'Optional dated official Protomaps URL; blank selects latest compatible build'
+        required: false
+        type: string
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/uk-map-packs.yml'
+      - 'maps/uk-regions.json'
+      - 'tools/build_uk_map_packs.py'
+      - 'tools/install_pmtiles_cli.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: convoy-uk-map-packs
+  cancel-in-progress: false
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned PMTiles CLI
+        run: bash tools/install_pmtiles_cli.sh
+      - name: Select compatible source and exact OSM timestamp
+        env:
+          REQUESTED_SOURCE: ${{ inputs.source_url }}
+        run: |
+          if [[ -n "$REQUESTED_SOURCE" ]]; then
+            python3 tools/build_uk_map_packs.py source --source-url "$REQUESTED_SOURCE"
+          else
+            python3 tools/build_uk_map_packs.py source
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uk-map-source
+          path: build/uk-maps/source.json
+          retention-days: 14
+
+  extract:
+    needs: source
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        region: [uk-scotland, uk-north-england, uk-south-england, uk-wales, uk-northern-ireland, uk-overview]
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tools/install_pmtiles_cli.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: uk-map-source
+          path: build/uk-maps
+      - name: Extract and validate actual regional file
+        env:
+          REGION_ID: ${{ matrix.region }}
+        run: python3 tools/build_uk_map_packs.py extract --region "$REGION_ID"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pack-${{ matrix.region }}
+          path: |
+            build/uk-maps/${{ matrix.region }}.pmtiles
+            build/uk-maps/${{ matrix.region }}.json
+          compression-level: 0
+          retention-days: 7
+      - name: Measure zoom 14 against zoom 13
+        if: matrix.region == 'uk-northern-ireland'
+        run: python3 tools/build_uk_map_packs.py extract --region uk-northern-ireland --max-zoom 14 --measurement
+      - uses: actions/upload-artifact@v4
+        if: matrix.region == 'uk-northern-ireland'
+        with:
+          name: uk-map-zoom-comparison
+          path: build/uk-maps/uk-northern-ireland-z14.json
+          retention-days: 14
+
+  publish:
+    needs: extract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: build/uk-maps
+          merge-multiple: true
+      - name: Compute verified consumer manifest and attribution
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: python3 tools/build_uk_map_packs.py manifest --repository "$REPOSITORY"
+      - name: Publish immutable map assets then stable catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          MAP_VERSION="$(python3 -c 'import json;print(json.load(open("build/uk-maps/source.json"))["version"])')"
+          if gh release view "$MAP_VERSION" >/dev/null 2>&1; then
+            echo 'This dated map version exists; immutable published assets will not be replaced.'
+          else
+            gh release create "$MAP_VERSION" --draft --title "Convoy UK maps $MAP_VERSION" --notes-file build/uk-maps/README-maps.md
+            gh release upload "$MAP_VERSION" build/uk-maps/*.pmtiles build/uk-maps/uk-map-manifest.json build/uk-maps/README-maps.md
+            gh release edit "$MAP_VERSION" --draft=false --latest=false
+          fi
+          if ! gh release view uk-maps-v1 >/dev/null 2>&1; then
+            gh release create uk-maps-v1 --title 'Convoy UK map catalog v1' --notes 'Current verified regional pack manifest. Map files are in immutable dated releases.' --latest=false
+          fi
+          gh release upload uk-maps-v1 build/uk-maps/uk-map-manifest.json --clobber
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uk-map-manifest-and-measurements
+          path: |
+            build/uk-maps/uk-map-manifest.json
+            build/uk-maps/README-maps.md
+            build/uk-maps/source.json
+            build/uk-maps/*-z14.json
+          retention-days: 90
