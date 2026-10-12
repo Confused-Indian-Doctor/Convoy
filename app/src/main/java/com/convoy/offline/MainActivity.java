@@ -437,7 +437,8 @@ public class MainActivity extends Activity {
   if(homeConvoy!=null)updateText(homeConvoy,s==null||!s.active?"Local mode • your location stays on this phone":s.sessionTitle()+" • "+(1+s.members.size())+" driver(s) connected");
   if(homeRoute!=null&&activeGpx!=null){GpxRoute.Progress p=map.getGpxProgress();updateText(homeRoute,activeGpx.name+"\n"+(followingGpx?"Following GPX track":"Saved route ready")+(p==null?" • "+formatDistance((float)activeGpx.totalMeters):" • "+formatDistance((float)p.remainingMeters)+" remaining"));}
  }
- private String selectedMapName(){for(MapPack pack:installedMaps)if(pack.selected)return pack.bundled?"UK region not downloaded":pack.name;return "UK region not downloaded";}
+ private String selectedMapName(){android.location.Location fix=location.fix();if(fix!=null)for(MapPack pack:installedMaps)if(!pack.bundled&&pack.covers(fix.getLatitude(),fix.getLongitude()))return pack.name;for(MapPack pack:installedMaps)if(pack.selected&&!pack.bundled)return pack.name;ArrayList<String> names=new ArrayList<>();for(MapPack pack:installedMaps)if(pack.installed&&!pack.bundled)names.add(pack.name);return names.isEmpty()?"UK region not downloaded":names.size()==1?names.get(0):names.size()+" installed map packs";}
+
  private void refreshStoredData(){
   storageWorker.execute(()->{try{
    mapPacks.migrateLegacy(getSharedPreferences("convoy",0).getString("mapName","Imported vector region"));

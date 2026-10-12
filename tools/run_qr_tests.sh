@@ -5,7 +5,13 @@ cd "$(dirname "$0")/.."
 qr_core_jar="${1:-}"
 if [[ -z "$qr_core_jar" ]]; then
   qr_cache_root="${GRADLE_USER_HOME:-$HOME/.gradle}"
-  qr_core_jar="$(rg --files "$qr_cache_root/caches/modules-2/files-2.1/com.google.zxing/core/3.5.3" 2>/dev/null | rg '/core-3\.5\.3\.jar$' | head -1 || true)"
+  qr_core_jar="$(python3 - "$qr_cache_root" <<'PYJAR'
+from pathlib import Path
+import sys
+root = Path(sys.argv[1]) / 'caches/modules-2/files-2.1/com.google.zxing/core/3.5.3'
+print(next((str(p) for p in root.glob('*/core-3.5.3.jar') if p.is_file()), ''))
+PYJAR
+)"
 fi
 [[ -f "$qr_core_jar" ]] || { echo 'Assemble the Android app first, or pass the resolved ZXing core 3.5.3 jar.' >&2; exit 1; }
 mkdir -p build/qr-test-classes
