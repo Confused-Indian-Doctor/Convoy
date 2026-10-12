@@ -76,7 +76,11 @@ public final class MapDownloadTest {
         File badResume=new File(root,"bad-resume");
         MapDownloadEngine changed=new MapDownloadEngine((url,offset,etag)->new MapDownloadEngine.Response(206,scotland.length,1,scotland.length,"\"wrong\"","identity",new ByteArrayInputStream(scotland),null));
         rejects(()->changed.download(source,badResume,()->1000000000L,()->false,null),"invalid resume Content-Range rejected");
-        File replacement=download(v2,scotland,downloadDir);MapPack newer=store.installDownloaded(replacement,v2);check(newer.version.equals("v2")&&!old.exists(),"update commits complete generation before reclaiming old data");
+        File replacement=download(v2,scotland,downloadDir);MapPack newer=store.installDownloaded(replacement,v2);check(newer.version.equals("v2")&&old.isFile(),"update retains prior MapLibre source while committing new generation");
+        store.pruneRevisions(newer);check(old.isFile(),"renderer acknowledgement retains five-minute revision grace");
+        old.setLastModified(System.currentTimeMillis()-MapPackStore.REVISION_GRACE_MILLIS-1000);
+        store.pruneRevisions(installed);check(old.isFile(),"obsolete renderer cannot reclaim the current generation");
+        store.pruneRevisions(newer);check(!old.exists()&&newer.file.isFile(),"current renderer acknowledgement safely reclaims expired previous revision");
         byte[] wales=fixture(MapPackCatalog.region("wales").bounds);MapPackSource w=source("wales","v1",wales);store.installDownloaded(download(w,wales,downloadDir),w);
         check(store.coveringPacks(51.48,-3.18).stream().anyMatch(p->p.id.equals("wales")),"multiple installed regions independently cover their area");
         check(store.chooseAt(51.48,-3.18,12).id.equals("wales"),"automatic regional map switching");

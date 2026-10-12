@@ -23,7 +23,7 @@ public final class MapPackSource {
                 !version.matches("[a-zA-Z0-9._-]{1,80}") || attribution == null || attribution.trim().isEmpty() || attribution.length() > 2000)
             throw new IOException("Incomplete map source metadata");
         try { LocalDate.parse(dataDate); URI url = new URI(downloadUrl);
-            if (!"https".equalsIgnoreCase(url.getScheme()) || url.getHost() == null || url.getUserInfo() != null || url.getFragment() != null)
+            if (!"https".equalsIgnoreCase(url.getScheme()) || url.getHost() == null || url.getUserInfo() != null || url.getFragment() != null || url.getPort() > 65535)
                 throw new IOException("Use an HTTPS map download source");
         } catch (IllegalArgumentException | URISyntaxException invalid) { throw new IOException("Invalid map source", invalid); }
         if (bytes < 127 || bytes > 8L * 1024 * 1024 * 1024 || sha256 == null || !sha256.matches("[0-9a-fA-F]{64}") ||

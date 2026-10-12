@@ -10,6 +10,7 @@ import java.util.*;
 public final class MapPackStore {
     public static final long MAX_IMPORT_BYTES = 2L * 1024 * 1024 * 1024;
     private static final int MAX_PACKS = 64, MAX_MANIFEST_BYTES = 128 * 1024;
+    public static final long REVISION_GRACE_MILLIS = 5 * 60 * 1000L;
     private static final Object CATALOG_LOCK = new Object();
     private final File filesDirectory, directory, manifest;
     private final long importLimit;
@@ -142,10 +143,24 @@ public final class MapPackStore {
                 String selected=catalog.getProperty("selected",MapPackCatalog.BUNDLED_ID);
                 checkInstallCancellation(cancellation);
                 writeCatalog(catalog);committed=true;
-                File[] revisions=owned.listFiles();if(revisions!=null)for(File revision:revisions)if(managedFile(revision.getName())&&!revision.equals(installed))revision.delete();
+                // Existing MapLibre styles can still have the prior path open while the new style loads.
+                // Reclaim only after the renderer acknowledges the current generation, with a grace period.
+                File[] revisions=owned.listFiles();long now=System.currentTimeMillis();
+                if(revisions!=null)for(File revision:revisions)if(managedFile(revision.getName())&&!revision.equals(installed))revision.setLastModified(now);
                 return snapshot(catalog,id,id.equals(selected),info);
             }
         } finally {if(!committed)installed.delete();}
+    }
+    /** Called off-main only after MapLibre has finished loading this exact installed generation. */
+    public void pruneRevisions(MapPack active) throws IOException {
+        if(active==null||active.bundled||active.file==null)return;
+        synchronized(CATALOG_LOCK){
+            Properties catalog=readCatalog();MapPack current=snapshot(catalog,active.id,false,null);
+            if(current==null||!current.file.equals(active.file))return;
+            File[] revisions=packDirectory(active.id).listFiles();long before=System.currentTimeMillis()-REVISION_GRACE_MILLIS;
+            if(revisions!=null)for(File revision:revisions)if(managedFile(revision.getName())&&!revision.equals(current.file)&&revision.lastModified()<=before)
+                if(!revision.delete()&&revision.exists())throw new IOException("Could not reclaim the previous map generation");
+        }
     }
     private static void checkInstallCancellation(MapDownloadEngine.Cancellation cancellation)throws InterruptedIOException {if(Thread.currentThread().isInterrupted()||(cancellation!=null&&cancellation.cancelled()))throw new InterruptedIOException("Map installation cancelled; existing map is unchanged");}
     public static void validateExpected(PmtilesArchive.Info info, MapPackSource source) throws IOException {

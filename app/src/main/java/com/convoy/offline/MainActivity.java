@@ -37,7 +37,7 @@ public class MainActivity extends Activity {
  private TextView status,detail,gps,voice,crewSummary,navPrimary,navSecondary,routeSummary,routeTitle;
  private Button trip,ptt,vox,routeAction,instrumentButton;
  private LinearLayout voiceBar;
- private TextView homeGps,homeMap,homeConvoy,homeRoute,mapImportStatus;
+ private TextView homeGps,homeMap,homeConvoy,homeRoute,mapImportStatus,attributionLabel;private Button coverageDownload;
  private long mapImportBytes;
  private final NavigationState navigation=new NavigationState();
  private CurrentLocation location;
@@ -235,8 +235,10 @@ public class MainActivity extends Activity {
   crewSummary=text("Offline map",10,GREEN);crewSummary.setGravity(Gravity.END);crewSummary.setSingleLine(true);
   crewSummary.setEllipsize(TextUtils.TruncateAt.END);mapStatus.addView(gps,new LinearLayout.LayoutParams(0,-2,1));
   mapStatus.addView(crewSummary,new LinearLayout.LayoutParams(0,-2,1));routeCard.addView(mapStatus);crewSummary.setOnClickListener(v->openScreen(NavigationState.OFFLINE_MAPS));
+  attributionLabel=text("© OpenStreetMap · Protomaps",8,0xFF213344);attributionLabel.setBackgroundColor(0xCCFFFFFF);attributionLabel.setGravity(Gravity.CENTER);attributionLabel.setContentDescription("Open map attribution");attributionLabel.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Map sources").setMessage(map.attribution+"\n\nOpenStreetMap data: openstreetmap.org/copyright\nProtomaps: docs.protomaps.com/basemaps\nNatural Earth public domain\nShrewsbury additional places: Overture Maps").setPositiveButton("Close",null).show());FrameLayout.LayoutParams credit=new FrameLayout.LayoutParams(-1,dp(18),Gravity.BOTTOM);mapFrame.addView(attributionLabel,credit);
+  coverageDownload=button("Download region map",false);coverageDownload.setTextSize(12);coverageDownload.setVisibility(View.GONE);coverageDownload.setOnClickListener(v->openScreen(NavigationState.OFFLINE_MAPS));FrameLayout.LayoutParams coveragePosition=new FrameLayout.LayoutParams(-2,dp(48),Gravity.BOTTOM|Gravity.START);coveragePosition.setMargins(dp(12),0,dp(96),dp(140));mapFrame.addView(coverageDownload,coveragePosition);
   FrameLayout.LayoutParams routePlacement=new FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM);
-  routePlacement.setMargins(dp(12),0,dp(12),dp(12));mapFrame.addView(routeCard,routePlacement);
+  routePlacement.setMargins(dp(12),0,dp(12),dp(24));mapFrame.addView(routeCard,routePlacement);
   mapFrame.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->{if(b-t!=ob-ot||r-l!=or-ol){compactMap=b-t<dp(410);mapLayoutSignature=-1;applyMapLayout();}});
  }
  private void addMapControl(Button b){
@@ -435,7 +437,7 @@ public class MainActivity extends Activity {
   if(homeConvoy!=null)updateText(homeConvoy,s==null||!s.active?"Local mode • your location stays on this phone":s.sessionTitle()+" • "+(1+s.members.size())+" driver(s) connected");
   if(homeRoute!=null&&activeGpx!=null){GpxRoute.Progress p=map.getGpxProgress();updateText(homeRoute,activeGpx.name+"\n"+(followingGpx?"Following GPX track":"Saved route ready")+(p==null?" • "+formatDistance((float)activeGpx.totalMeters):" • "+formatDistance((float)p.remainingMeters)+" remaining"));}
  }
- private String selectedMapName(){for(MapPack pack:installedMaps)if(pack.selected)return pack.name;return "Shrewsbury development region";}
+ private String selectedMapName(){for(MapPack pack:installedMaps)if(pack.selected)return pack.bundled?"UK region not downloaded":pack.name;return "UK region not downloaded";}
  private void refreshStoredData(){
   storageWorker.execute(()->{try{
    mapPacks.migrateLegacy(getSharedPreferences("convoy",0).getString("mapName","Imported vector region"));
@@ -596,7 +598,7 @@ public class MainActivity extends Activity {
   if(!ptt.isEnabled()&&s!=null)s.ptt=false;
   updateText(ptt,running&&s.ptt?(pttPhysicalDown?"Release to listen":"Tap to finish talking"):"Hold to talk");
   updateDescription(ptt,running&&s.ptt?"Talking. Release or click to stop transmitting":"Hold to transmit voice. Accessibility click toggles talking on or off.");
-  map.refresh();if(!map.mapCoverageNotice().isEmpty())updateText(crewSummary,map.mapCoverageNotice());updateToolbar();offlineMaps.tickLocation();updateNavigationBanner();updateHomeStatus();updateVoiceVisibility();updateCrew();handler.postDelayed(this,1000);
+  map.refresh();String coverage=map.mapCoverageNotice();coverageDownload.setVisibility(coverage.isEmpty()||showInstruments?View.GONE:View.VISIBLE);if(!coverage.isEmpty()){updateText(coverageDownload,coverage);updateText(crewSummary,"Download map");}updateText(attributionLabel,"© OpenStreetMap · Protomaps"+(map.attribution.contains("Overture")?" · Overture":""));updateToolbar();offlineMaps.tickLocation();updateNavigationBanner();updateHomeStatus();updateVoiceVisibility();updateCrew();handler.postDelayed(this,1000);
  }};
  private void updateNavigationBanner(){
   if(navPrimary==null||navSecondary==null||routeSummary==null)return;

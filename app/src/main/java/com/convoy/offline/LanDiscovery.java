@@ -17,6 +17,7 @@ import android.os.Looper;
 import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -326,7 +327,10 @@ public final class LanDiscovery implements AutoCloseable {
         info.setServiceName(metadata.serviceName());
         info.setServiceType(LanAdvertisement.SERVICE_TYPE);
         info.setPort(metadata.port);
-        for (Map.Entry<String, byte[]> value : metadata.attributes().entrySet()) info.setAttribute(value.getKey(), value.getValue());
+        // Android's public SDK exposes String TXT values; its byte[] overload is hidden.
+        // These values were generated from bounded UTF-8 text by LanAdvertisement.
+        for (Map.Entry<String, byte[]> value : metadata.attributes().entrySet())
+            info.setAttribute(value.getKey(), new String(value.getValue(), StandardCharsets.UTF_8));
         NsdManager.RegistrationListener callback = new NsdManager.RegistrationListener() {
             @Override public void onServiceRegistered(NsdServiceInfo registered) { main.post(() -> {
                 if (closed || registration != this) {

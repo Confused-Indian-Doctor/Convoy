@@ -91,6 +91,7 @@ public final class MapDownloadEngine {
                 connection=(HttpURLConnection)target.openConnection();connection.setConnectTimeout(20000);connection.setReadTimeout(30000);connection.setInstanceFollowRedirects(false);
                 connection.setRequestProperty("Accept-Encoding","identity");connection.setRequestProperty("User-Agent","Convoy-Offline-Maps/1");
                 if(offset>0){connection.setRequestProperty("Range","bytes="+offset+"-");connection.setRequestProperty("If-Range",etag);}
+                try {
                 int status=connection.getResponseCode();if(status==301||status==302||status==303||status==307||status==308){String location=connection.getHeaderField("Location");connection.disconnect();if(location==null||redirects==5)throw new IOException("Map download redirect failed");target=new URL(target,location);continue;}
                 long length=connection.getContentLengthLong(),start=0,total=length;
                 if(status==206){String range=connection.getHeaderField("Content-Range");
@@ -101,6 +102,7 @@ public final class MapDownloadEngine {
                 HttpURLConnection owned=connection;
                 InputStream body=status==200||status==206?connection.getInputStream():null;
                 return new Response(status,length,start,total,connection.getHeaderField("ETag"),connection.getHeaderField("Content-Encoding"),body,owned::disconnect);
+                } catch(IOException | RuntimeException failed){connection.disconnect();throw failed;}
             }
             throw new IOException("Map server redirect loop");
         }
