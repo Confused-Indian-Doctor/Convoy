@@ -23,6 +23,9 @@ if [[ "$skip_region" == false ]]; then
   bash tools/fetch_shrewsbury_region.sh
 fi
 if [[ "$skip_tests" == false ]]; then
+  bash tools/run_invite_tests.sh
+  bash tools/run_discovery_tests.sh
+  bash tools/run_map_download_tests.sh
   bash tools/run_protocol_tests.sh
   bash tools/run_local_tiles_tests.sh
   bash tools/run_gpx_tests.sh
@@ -36,6 +39,7 @@ if [[ "$skip_tests" == false ]]; then
 fi
 mkdir -p build/release
 "${gradle_command[@]}" --no-daemon --stacktrace :app:assembleRelease :app:assembleDebug :app:lintRelease 2>&1 | tee build/android-build.txt
+bash tools/run_qr_tests.sh
 version="$(sed -n "s/.*versionName '\([^']*\)'.*/\1/p" app/build.gradle)"
 [[ -n "$version" ]] || { echo 'Missing Gradle versionName.' >&2; exit 1; }
 unsigned="build/release/Convoy-${version}-aligned-unsigned.apk"

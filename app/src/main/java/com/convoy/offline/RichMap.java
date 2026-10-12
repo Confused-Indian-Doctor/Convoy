@@ -30,7 +30,8 @@ public final class RichMap extends FrameLayout {
  private final ExecutorService workers=Executors.newSingleThreadExecutor();
  private final OfflineRouter router=new OfflineRouter(); private final PlaceIndex index;
  private final CurrentLocation locations;
- private MapPack selectedPack;
+ private MapPack selectedPack;private boolean selectingPack=false;private long lastPackCheck=0;private String coverageNotice="";
+ public String mapCoverageNotice(){return coverageNotice;}
  private ArrayList<TripPlan.Waypoint> waypoints=new ArrayList<>();
  private boolean navigationMode=true,follow=true,routeBusy=false,disposed=false;
  private volatile boolean routerLoading=true;
@@ -50,7 +51,7 @@ public final class RichMap extends FrameLayout {
 
  public RichMap(Context c){
   super(c); index=new PlaceIndex(c); locations=CurrentLocation.get(c); MapLibre.getInstance(c.getApplicationContext()); mapView=new MapView(c); addView(mapView,new FrameLayout.LayoutParams(-1,-1));mapView.onCreate(null);
-  mapView.getMapAsync(m->{if(disposed)return;map=m;m.getUiSettings().setLogoEnabled(false);m.getUiSettings().setAttributionEnabled(false);m.getUiSettings().setCompassEnabled(true);m.setMinZoomPreference(3);m.setMaxZoomPreference(18);m.addOnCameraMoveStartedListener(reason->{if(reason==MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE)follow=false;});m.addOnCameraIdleListener(()->{if(!follow)zoom=map.getCameraPosition().zoom;});m.addOnMapClickListener(this::tap);load();});
+  mapView.getMapAsync(m->{if(disposed)return;map=m;m.getUiSettings().setLogoEnabled(false);m.getUiSettings().setAttributionEnabled(false);m.getUiSettings().setCompassEnabled(true);m.setMinZoomPreference(3);m.setMaxZoomPreference(18);m.addOnCameraMoveStartedListener(reason->{if(reason==MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE)follow=false;});m.addOnCameraIdleListener(()->{if(!follow)zoom=map.getCameraPosition().zoom;maybeSelectPack();});m.addOnMapClickListener(this::tap);load();});
   workers.execute(()->{try{router.load(c.getApplicationContext().getAssets().open("route.graph"));}catch(Exception ignored){}finally{routerLoading=false;}main.post(()->{if(!disposed)refresh();});});
  }
  public void setOnPlaceSelectedListener(OnPlaceSelectedListener l){placeListener=l;}
@@ -111,7 +112,8 @@ public final class RichMap extends FrameLayout {
  public void onSaveInstanceState(Bundle b){mapView.onSaveInstanceState(b);}
  public void dispose(){disposed=true;routeGeneration++;styleGeneration++;gpxGeneration++;workers.shutdownNow();main.removeCallbacksAndMessages(null);index.close();mapView.onDestroy();}
 
- public void load(){
+ public void load(){load(null,false);}
+ private void load(MapPack requested,boolean automatic){
   if(map==null||disposed)return;
   final int generation=++styleGeneration;
   final Context context=getContext().getApplicationContext();
@@ -120,15 +122,19 @@ public final class RichMap extends FrameLayout {
   workers.execute(()->{try{
    File apk=new File(context.getApplicationInfo().sourceDir),directory=new File(context.getFilesDir(),"bundled-vector-maps");
    MapPack pack=null;File imported=null;
-   try{MapPackStore packs=new MapPackStore(context.getFilesDir());pack=packs.selected();imported=packs.selectedFile();}catch(IOException error){android.util.Log.w("ConvoyMap","Using bundled map because map catalogue could not be read",error);}
+   try{MapPackStore packs=new MapPackStore(context.getFilesDir());pack=requested!=null?requested:packs.selected();imported=pack.file;}catch(IOException error){android.util.Log.w("ConvoyMap","Using bundled map because map catalogue could not be read",error);}
    File basemap=imported!=null?imported:LocalTiles.extractAsset(apk,directory,"shrewsbury.pmtiles");
    File places=LocalTiles.extractAsset(apk,directory,"overture-shrewsbury.pmtiles");
    String json=readAsset("convoy-style.json")
      .replace("__BASEMAP_URI__",escapeJson("pmtiles://"+android.net.Uri.fromFile(basemap)))
      .replace("__PLACES_URI__",escapeJson("pmtiles://"+android.net.Uri.fromFile(places)));
    final MapPack loadedPack=pack;
-   main.post(()->{if(disposed||generation!=styleGeneration)return;selectedPack=loadedPack;mapName=loadedPack==null?"Shrewsbury development region":loadedPack.name;style=null;map.setStyle(new Style.Builder().fromJson(json),s->{if(disposed||generation!=styleGeneration)return;style=s;addCarImages(s);updateDynamic();updateGpxSources();if(previous!=null)map.setCameraPosition(previous);else{map.setCameraPosition(new CameraPosition.Builder().target(new LatLng(52.7078,-2.7541)).zoom(13.3).build());if(loadedPack!=null&&!loadedPack.bundled)focusBounds(loadedPack.bounds.south,loadedPack.bounds.west,loadedPack.bounds.north,loadedPack.bounds.east);}if(previous!=null&&loadedPack!=null&&!loadedPack.id.equals(previousPackId)&&!loadedPack.bounds.contains(previous.target.getLatitude(),previous.target.getLongitude()))focusBounds(loadedPack.bounds.south,loadedPack.bounds.west,loadedPack.bounds.north,loadedPack.bounds.east);cameraInitialised=true;if(pendingGpxFocus)focusGpxRoute();refresh();});});
+   main.post(()->{if(disposed||generation!=styleGeneration)return;selectedPack=loadedPack;mapName=loadedPack==null?"Shrewsbury development region":loadedPack.name;style=null;map.setStyle(new Style.Builder().fromJson(json),s->{if(disposed||generation!=styleGeneration)return;style=s;addCarImages(s);updateDynamic();updateGpxSources();if(previous!=null)map.setCameraPosition(previous);else{map.setCameraPosition(new CameraPosition.Builder().target(new LatLng(52.7078,-2.7541)).zoom(13.3).build());if(loadedPack!=null&&!loadedPack.bundled)focusBounds(loadedPack.bounds.south,loadedPack.bounds.west,loadedPack.bounds.north,loadedPack.bounds.east);}if(!automatic&&previous!=null&&loadedPack!=null&&!loadedPack.id.equals(previousPackId)&&!loadedPack.bounds.contains(previous.target.getLatitude(),previous.target.getLongitude()))focusBounds(loadedPack.bounds.south,loadedPack.bounds.west,loadedPack.bounds.north,loadedPack.bounds.east);cameraInitialised=true;if(pendingGpxFocus)focusGpxRoute();refresh();});});
   }catch(Exception error){main.post(()->{if(disposed||generation!=styleGeneration)return;android.util.Log.e("ConvoyMap","Offline map preparation failed",error);Toast.makeText(getContext(),"Vector map: "+error.getMessage(),Toast.LENGTH_LONG).show();});}});
+ }
+ private void maybeSelectPack(){
+  if(disposed||map==null||style==null||!isShown()||selectingPack)return;long now=SystemClock.elapsedRealtime();if(now-lastPackCheck<1500)return;lastPackCheck=now;CameraPosition camera=map.getCameraPosition();LatLng target=camera.target;if(target==null)return;double lat=target.getLatitude(),lon=target.getLongitude();double z=camera.zoom;Location fix=locations.fix();if(follow&&freshFix(fix)){lat=fix.getLatitude();lon=fix.getLongitude();}final double latitude=lat,longitude=lon;selectingPack=true;
+  workers.execute(()->{try{MapPack next=new MapPackStore(getContext().getFilesDir()).chooseAt(latitude,longitude,z);MapPackCatalog.Region region=MapPackCatalog.at(latitude,longitude);String notice=next==null?"Offline map not installed"+(region==null?" for this area":" • "+region.name)+" · Download":next.maxZoom<=7&&z>7?"Overview only • download regional map":"";main.post(()->{selectingPack=false;if(disposed)return;coverageNotice=notice;if(next!=null&&(selectedPack==null||!next.id.equals(selectedPack.id)||!Objects.equals(next.file,selectedPack.file)))load(next,true);});}catch(IOException error){main.post(()->selectingPack=false);}});
  }
  private String readAsset(String name)throws IOException{try(InputStream in=getContext().getAssets().open(name);ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[8192];int n;while((n=in.read(b))>0)out.write(b,0,n);return out.toString("UTF-8");}}
  private String escapeJson(String s){return s.replace("\\","\\\\").replace("\"","\\\"");}
@@ -144,7 +150,7 @@ public final class RichMap extends FrameLayout {
    }
   }
  }
- public void refresh(){if(disposed)return;updateDrivingBearing(locations.fix());updateDynamic();maybeRoute();maybeGpxProgress();refreshCamera(false);updateNavigationProgress();}
+ public void refresh(){if(disposed)return;maybeSelectPack();updateDrivingBearing(locations.fix());updateDynamic();maybeRoute();maybeGpxProgress();refreshCamera(false);updateNavigationProgress();}
  private void updateDynamic(){if(style==null)return;try{
   ArrayList<Feature> wfs=new ArrayList<>();ArrayList<Point> tripPoints=new ArrayList<>();int n=1;for(TripPlan.Waypoint w:waypoints){Feature f=Feature.fromGeometry(Point.fromLngLat(w.lon,w.lat));f.addStringProperty("label",n+"  "+w.name);f.addStringProperty("type",w.type);wfs.add(f);if(!w.done)tripPoints.add(Point.fromLngLat(w.lon,w.lat));n++;}set("waypoints",FeatureCollection.fromFeatures(wfs));ArrayList<Feature> t=new ArrayList<>();if(tripPoints.size()>1)t.add(Feature.fromGeometry(LineString.fromLngLats(tripPoints)));set("trip",FeatureCollection.fromFeatures(t));
   ConvoyService s=ConvoyService.current;Location fix=locations.fix();ArrayList<Feature> own=new ArrayList<>(),crew=new ArrayList<>();if(fix!=null){Feature f=Feature.fromGeometry(Point.fromLngLat(fix.getLongitude(),fix.getLatitude()));f.addStringProperty("name",freshFix(fix)?"You":"You · GPS stale");f.addStringProperty("icon","car-"+safeCar(locations.selectedCar()));f.addNumberProperty("bearing",lastDrivingBearing);own.add(f);}if(s!=null)for(ConvoyService.Member m:s.members.values())if(m.located){Feature f=Feature.fromGeometry(Point.fromLngLat(m.lon,m.lat));f.addStringProperty("name",m.name+(m.age()>15000?" · stale":""));f.addStringProperty("icon","car-"+safeCar(m.car));crew.add(f);}set("own",FeatureCollection.fromFeatures(own));set("crew",FeatureCollection.fromFeatures(crew));

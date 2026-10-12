@@ -44,6 +44,9 @@ jobs:
 
       - name: Run protocol and offline-data tests
         run: |
+          bash tools/run_invite_tests.sh
+          bash tools/run_discovery_tests.sh
+          bash tools/run_map_download_tests.sh
           bash tools/run_protocol_tests.sh
           bash tools/run_local_tiles_tests.sh
           bash tools/run_gpx_tests.sh
@@ -183,6 +186,10 @@ jobs:
             build/release/unsigned.sha256
             build/release/apk-badging.txt
             build/release/packaging-checks.txt
+            build/qr-tests.txt
+            build/invite-tests.txt
+            build/discovery-tests.txt
+            build/map-download-tests.txt
             build/gpx-tests.txt
             build/map-pack-tests.txt
             build/location-tests.txt
@@ -215,6 +222,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back emulated -camera-front emulated
           script: bash tools/emulator_smoke.sh
 
       - name: Preserve Android 35 smoke evidence
@@ -228,6 +236,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back emulated -camera-front emulated
           script: bash tools/emulator_smoke.sh
 
       - name: Upload signed installable release
@@ -258,6 +267,10 @@ jobs:
           path: |
             build/smoke/
             build/smoke-api35/
+            build/qr-tests.txt
+            build/invite-tests.txt
+            build/discovery-tests.txt
+            build/map-download-tests.txt
             build/gpx-tests.txt
             build/map-pack-tests.txt
             build/location-tests.txt

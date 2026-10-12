@@ -25,6 +25,7 @@ import java.util.concurrent.Executors;
 public class MainActivity extends Activity {
  private static final int BG=0xFF0D1520, CARD=0xFF182433, GREEN=0xFF438AFF,
          TEXT=0xFFF1F5FA, MUTED=0xFFA6B5C7, AMBER=0xFFFFBC52;
+ private LinearLayout toolbar;private TextView toolbarTitle;private Button toolbarBack;private ConvoyOnboarding onboarding;private OfflineMapsCoordinator offlineMaps;
  private LinearLayout root,body,mapPanel,crewPanel,mapControls,searchOverlay,routeCard,connectionBranding;
  private FrameLayout mapFrame;
  private RichMap map;
@@ -57,7 +58,7 @@ public class MainActivity extends Activity {
  private int tab=NavigationState.HOME,mapLayoutSignature=-1,directionResource=0;
  private Runnable permissionAction;
  private Runnable voicePermissionAction;
- private boolean importing=false,hadTrip=false,compactMap=false,showInstruments=false,pttTouchClick=false,pttPhysicalDown=false;
+ private boolean homeActiveShown=false;private boolean importing=false,hadTrip=false,compactMap=false,showInstruments=false,pttTouchClick=false,pttPhysicalDown=false;
 
  private int dp(float n){return (int)(getResources().getDisplayMetrics().density*n+0.5f);}
  private GradientDrawable shape(int color,int radius){
@@ -97,7 +98,9 @@ public class MainActivity extends Activity {
   getWindow().setStatusBarColor(Color.TRANSPARENT);getWindow().setNavigationBarColor(Color.TRANSPARENT);
   location=CurrentLocation.get(this);routeLibrary=new RouteLibrary(getFilesDir());mapPacks=new MapPackStore(getFilesDir());
   if(b!=null){navigation.restore(b.getInt("screen",NavigationState.HOME),b.getInt("detailParent",NavigationState.ROUTES));tab=navigation.screen();detailRouteId=b.getString("detailRouteId","");}
-  build();refreshStoredData();
+  onboarding=new ConvoyOnboarding(this,new ConvoyOnboarding.Host(){public void startHost(String name,String car){startConsumerHost(name,car);}public void join(ConvoyInvite invite,String name,String car){joinConsumer(invite,name,car);}public void advanced(){advancedSetup();}public void crew(){openScreen(NavigationState.CREW);}public void changed(){if(!isDestroyed()&&!isFinishing())renderTab();}});
+  offlineMaps=new OfflineMapsCoordinator(this,mapPacks,location,new OfflineMapsCoordinator.Host(){public void importCustom(){pickMap("custom",null);}public void selectPack(MapPack pack){selectMap(pack);}public void removePack(MapPack pack){removeMap(pack);}public void replacePack(MapPack pack){pickMap(pack.regionId,pack.id);}public void developerMaps(){MainActivity.this.developerMaps();}public void installedChanged(){map.reloadSelectedMap();refreshStoredData();}});
+  build();refreshStoredData();consumeInvite(getIntent());
   if(Build.VERSION.SDK_INT>=33){backCallback=this::handleBack;getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,backCallback);}
  }
  private void build(){
@@ -110,10 +113,11 @@ public class MainActivity extends Activity {
    return in;
   });
   root.requestApplyInsets();
-  LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);
+  LinearLayout head=new LinearLayout(this);toolbar=head;head.setGravity(Gravity.CENTER_VERTICAL);
   head.setPadding(dp(16),dp(6),dp(12),dp(6));head.setBackgroundColor(CARD);
+  toolbarBack=button("←",false);toolbarBack.setContentDescription("Back to Home");toolbarBack.setTextSize(22);toolbarBack.setElevation(0);head.addView(toolbarBack,new LinearLayout.LayoutParams(dp(48),dp(44)));toolbarBack.setOnClickListener(v->handleBack());
   LinearLayout branding=new LinearLayout(this);connectionBranding=branding;branding.setOrientation(LinearLayout.VERTICAL);
-  TextView title=text("convoy",23,TEXT);title.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));
+  TextView title=text("convoy",23,TEXT);toolbarTitle=title;title.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));
   branding.addView(title);status=text("Offline. Together.",11,MUTED);status.setSingleLine(true);
   status.setEllipsize(TextUtils.TruncateAt.END);branding.addView(status);
   head.addView(branding,new LinearLayout.LayoutParams(0,-2,1));
@@ -121,19 +125,21 @@ public class MainActivity extends Activity {
   branding.setContentDescription("Convoy connection status. Tap for trip details");
   branding.setOnClickListener(v->new AlertDialog.Builder(this).setTitle(status.getText()).setMessage(detail.getText())
           .setPositiveButton("Crew",(d,w)->openScreen(NavigationState.CREW)).setNegativeButton("Close",null).show());
-  trip=button("Start trip",true);head.addView(trip,new LinearLayout.LayoutParams(dp(112),dp(48)));
-  trip.setOnClickListener(v->{
-   if(ConvoyService.current!=null)new AlertDialog.Builder(this).setTitle("End this trip?")
-           .setMessage("Location sharing and voice will stop on this phone.").setNegativeButton("Keep going",null)
-           .setPositiveButton("End trip",(d,w)->stopService(new Intent(this,ConvoyService.class))).show();
-   else setup();
-  });
+  trip=button("Start Convoy",true);head.addView(trip,new LinearLayout.LayoutParams(dp(112),dp(48)));trip.setOnClickListener(v->onboarding.start());
   root.addView(head,new LinearLayout.LayoutParams(-1,dp(64)));
   body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);
   root.addView(body,new LinearLayout.LayoutParams(-1,0,1));
   map=new RichMap(this);map.setWaypoints(TripPlan.load(this));map.setNavigationMode(true);
   map.setOnPlaceSelectedListener(this::placeSheet);buildMapPanel();buildVoiceBar();buildTabs();renderTab();
  }
+ private void updateToolbar(){boolean home=tab==NavigationState.HOME;ConvoyService s=ConvoyService.current;boolean active=s!=null&&s.active;toolbarBack.setVisibility(home?View.GONE:View.VISIBLE);String title=home?"convoy":tab==NavigationState.MAP?"Map":tab==NavigationState.ROUTES?"Routes":tab==NavigationState.CREW?"Crew":tab==NavigationState.OFFLINE_MAPS?"Offline Maps":tab==NavigationState.GPX_DETAIL?"GPX route":"Guide";updateText(toolbarTitle,title);toolbarTitle.setTextSize(home?25:18);toolbar.setLayoutParams(new LinearLayout.LayoutParams(-1,dp(home?72:52)));status.setVisibility(home||active?View.VISIBLE:View.GONE);if(active)updateText(status,s.sessionTitle()+" • "+(1+s.members.size())+" drivers");trip.setVisibility(View.GONE);}
+ private void startConsumerHost(String name,String car){if(ConvoyService.current!=null)return;String preference=getPreferences(0).getString("networkMode","auto");android.net.ConnectivityManager cm=getSystemService(android.net.ConnectivityManager.class);boolean wifi=false;for(android.net.Network n:cm.getAllNetworks()){android.net.NetworkCapabilities c=cm.getNetworkCapabilities(n);if(c!=null&&c.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)){wifi=true;break;}}boolean hotspot="hotspot".equals(preference)||("auto".equals(preference)&&!wifi);permissions(false,hotspot,()->{startForegroundService(new Intent(this,ConvoyService.class).putExtra("consumer",true).putExtra("host",true).putExtra("name",name).putExtra("car",car).putExtra("hotspot",hotspot));onboarding.showInvite();});}
+ private void joinConsumer(ConvoyInvite invite,String name,String car){boolean bt=invite.network.mode==ConvoyInvite.Mode.BLUETOOTH,hotspot=invite.network.mode==ConvoyInvite.Mode.HOTSPOT;permissions(bt,hotspot,()->{startForegroundService(new Intent(this,ConvoyService.class).putExtra("consumer",true).putExtra("host",false).putExtra("name",name).putExtra("car",car).putExtra("bluetooth",bt).putExtra("invitation",invite.token()));openScreen(NavigationState.CREW);});}
+ private void networkPreference(){String[] names={"Automatic • existing Wi-Fi, otherwise local hotspot","Existing Wi-Fi / travel router / vehicle mesh","Create a local hotspot"},keys={"auto","lan","hotspot"};String saved=getPreferences(0).getString("networkMode","auto");int checked=Arrays.asList(keys).indexOf(saved);new AlertDialog.Builder(this).setTitle("Convoy network preference").setSingleChoiceItems(names,Math.max(0,checked),(d,w)->{getPreferences(0).edit().putString("networkMode",keys[w]).apply();d.dismiss();}).setNegativeButton("Close",null).show();}
+ private void diagnostics(){ConvoyService s=ConvoyService.current;new AlertDialog.Builder(this).setTitle("Connection diagnostics").setMessage(s==null?"No active convoy. Advanced manual Wi-Fi and paired Bluetooth remain available for compatibility.":s.connectionDiagnostics()).setPositiveButton("Close",null).setNeutralButton("Advanced",(d,w)->{if(ConvoyService.current==null)advancedSetup();else alert("End this convoy before changing connection mode.");}).show();}
+ private void developerMaps(){try{for(MapPack pack:mapPacks.list())if(pack.bundled){MapPack selected=pack;new AlertDialog.Builder(this).setTitle("Developer / Test Maps").setMessage("Shrewsbury map, search and routing are retained for regression testing.").setPositiveButton("Open Shrewsbury",(d,w)->selectMap(selected)).setNegativeButton("Close",null).show();break;}}catch(IOException e){alert("Could not read development map.");}}
+ private void consumeInvite(Intent intent){Uri link=intent==null?null:intent.getData();if(link==null)return;String value=link.toString();setIntent(new Intent(this,MainActivity.class));handler.post(()->onboarding.acceptLink(value));}
+ @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);consumeInvite(intent);}
  private void buildMapPanel(){
   mapPanel=new LinearLayout(this);mapPanel.setOrientation(LinearLayout.VERTICAL);
   mapFrame=new FrameLayout(this);mapFrame.setBackgroundColor(0xFFE2EDE7);
@@ -228,7 +234,7 @@ public class MainActivity extends Activity {
   gps=text("Location permission required",10,MUTED);gps.setSingleLine(true);gps.setEllipsize(TextUtils.TruncateAt.END);
   crewSummary=text("Offline map",10,GREEN);crewSummary.setGravity(Gravity.END);crewSummary.setSingleLine(true);
   crewSummary.setEllipsize(TextUtils.TruncateAt.END);mapStatus.addView(gps,new LinearLayout.LayoutParams(0,-2,1));
-  mapStatus.addView(crewSummary,new LinearLayout.LayoutParams(0,-2,1));routeCard.addView(mapStatus);
+  mapStatus.addView(crewSummary,new LinearLayout.LayoutParams(0,-2,1));routeCard.addView(mapStatus);crewSummary.setOnClickListener(v->openScreen(NavigationState.OFFLINE_MAPS));
   FrameLayout.LayoutParams routePlacement=new FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM);
   routePlacement.setMargins(dp(12),0,dp(12),dp(12));mapFrame.addView(routeCard,routePlacement);
   mapFrame.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->{if(b-t!=ob-ot||r-l!=or-ol){compactMap=b-t<dp(410);mapLayoutSignature=-1;applyMapLayout();}});
@@ -335,23 +341,26 @@ public class MainActivity extends Activity {
    b.setContentDescription(b.getText()+" tab"+(selected?", selected":""));
   }
   body.removeAllViews();mapImportStatus=null;crewPanel=null;homeGps=null;homeMap=null;homeRoute=null;homeConvoy=null;
-  trip.setVisibility(tab==NavigationState.HOME?View.GONE:View.VISIBLE);updateLocationLease();
+  updateToolbar();updateLocationLease();
   updateVoiceVisibility();
   if(tab==NavigationState.MAP){body.addView(mapPanel,new LinearLayout.LayoutParams(-1,-1));requestMapLocation(false);return;}
   ScrollView scroll=new ScrollView(this);LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(18),dp(18),dp(18),dp(16));scroll.addView(box);body.addView(scroll,new LinearLayout.LayoutParams(-1,-1));
   if(tab==NavigationState.HOME){renderHome(box);return;}
   if(tab==NavigationState.ROUTES){renderRoutes(box);renderPlan(box);return;}
-  if(tab==NavigationState.OFFLINE_MAPS){renderOfflineMaps(box);return;}
+  if(tab==NavigationState.OFFLINE_MAPS){offlineMaps.setImportProgress(importing,mapImportBytes);View maps=offlineMaps.build();if(maps.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)maps.getParent()).removeView(maps);box.setPadding(dp(12),dp(8),dp(12),dp(12));box.addView(maps);requestMapLocation(false);return;}
   if(tab==NavigationState.GPX_DETAIL){renderRouteDetails(box);return;}
   if(tab==NavigationState.CREW){crewPanel=box;crewSnapshot.clear();crewSnapshotService=null;updateCrew();return;}
   addSection(box,"Map without a convoy","Open Map for your own GPS position and selected car. Location stays on this phone. No hotspot, Bluetooth connection, microphone or crew sharing starts until you explicitly start a convoy.");
-  Button carChoice=button("Choose your car icon",false);spaced(box,carChoice,52);carChoice.setOnClickListener(v->chooseCar());
+  Button profile=button("Profile",false);spaced(box,profile,52);profile.setOnClickListener(v->onboarding.editProfile());
   Button maps=button("Offline Maps",false);spaced(box,maps,52);maps.setOnClickListener(v->openScreen(NavigationState.OFFLINE_MAPS));
-  addSection(box,"Before you leave","Install the same APK on every phone. Allow Location and the permissions for your selected connection. Microphone permission is requested only when you enable convoy voice. Everyone uses the same group key.");
+  Button diagnostics=button("Connection diagnostics",false);spaced(box,diagnostics,52);diagnostics.setOnClickListener(v->diagnostics());
+  Button network=button("Convoy network preference",false);spaced(box,network,52);network.setOnClickListener(v->networkPreference());
+  if((getApplicationInfo().flags&android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)!=0){Button developer=button("Developer / Test Maps",false);spaced(box,developer,52);developer.setOnClickListener(v->developerMaps());}
+  addSection(box,"Bring your crew together","Save your profile once. Start Convoy creates a fresh private session. Friends choose Join Convoy and scan the QR or open a shared invite. Android can ask to connect to the host's local Wi-Fi; keep the network even if it has no Internet. On an existing router or vehicle mesh, local discovery finds the host automatically.");
   addSection(box,"Trip plan & POIs","Use Plan to save fuel, food, rest, viewpoint, meet-up, hazard and custom stops. Planned stops are stored on this phone and appear on the map. The thin dashed line shows your stop sequence; a thick blue line shows the calculated offline driving route to your next unvisited stop. Share a plan before departure and paste/import it on the other phones.");
-  addSection(box,"Wi-Fi • recommended","Choose one host. It can create a local hotspot with no internet. Friends join the displayed Wi-Fi in Android settings, choose Join in Convoy, and enter the host’s local IP. Keep the no-internet Wi-Fi connection when Android asks. A passenger can also use a portable router or a manually enabled hotspot.");
+  addSection(box,"Wi-Fi • recommended","Share an invitation only with your crew. A valid QR/link authorises a join; Nearby Convoys only finds hosts and never grants access. Stop accepting new drivers pauses admission while existing drivers remain connected. Ending the convoy invalidates its invitations.");
   addSection(box,"Bluetooth • alternative","Pair each friend’s phone with the host in Android Bluetooth settings first. Host starts Bluetooth mode; friends choose that paired host and enter the group key. Wi-Fi and Bluetooth modes are separate; there is no automatic radio switching.");
-  addSection(box,"UK offline map packs","MapLibre reads local PMTiles. Shrewsbury remains the bundled development region. Offline Maps manages imported Scotland, Northern England, Southern England, Wales, Northern Ireland and custom UK packs. Map tiles, search data and routing data are separate: importing a basemap does not install a road graph or search index.");
+  addSection(box,"UK offline map packs","MapLibre reads local PMTiles. Offline Maps downloads verified Scotland, Northern England, Southern England, Wales and Northern Ireland regional packs. The small UK overview supplies low-zoom context. Advanced users can still import custom UK maps. Map tiles, search data and routing data are separate: importing a basemap does not install a road graph or search index.");
   addSection(box,"GPX routes","Import a GPX through Android Files from local storage or a connected document provider. Saved tracks retain their original geometry and segment breaks. Follow route shows approximate progress, remaining distance and distance off the track. GPX itself has no reliable turn instructions or travel-time estimates. Convoy stops remain a separate plan.");
   addSection(box,"Map controls","Search and the category chips work fully offline. Drive follows your heading; switch to North for a north-up map. Tap the location control to resume following after moving the map. Gauges opens the GPS speedometer and calibrated G-force, pitch and roll display; tap the lower gauge to zero tilt while mounted and parked.");
   addSection(box,"While moving","Let a passenger handle the screen. Enable hands-free before departure; hold-to-talk is for passengers or when parked. Voice is walkie-talkie style, one speaker at a time. Adjust media volume for received voice. Radio range can be short inside moving cars; stay within the connection’s tested range.");
@@ -369,7 +378,7 @@ public class MainActivity extends Activity {
  }
  @Override public void onBackPressed(){handleBack();}
  private void updateLocationLease(){
-  if(location!=null)location.setForegroundClient(this,resumed&&(tab==NavigationState.MAP||tab==NavigationState.ROUTES||tab==NavigationState.GPX_DETAIL));
+  if(location!=null)location.setForegroundClient(this,resumed&&(tab==NavigationState.MAP||tab==NavigationState.ROUTES||tab==NavigationState.GPX_DETAIL||tab==NavigationState.OFFLINE_MAPS));
  }
  private boolean hasLocationPermission(){return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED||checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED;}
  private void requestMapLocation(boolean explicit){
@@ -397,7 +406,7 @@ public class MainActivity extends Activity {
   if(description!=null&&!description.isEmpty()){TextView subtitle=text(description,12,MUTED);subtitle.setPadding(dp(4),0,0,dp(10));box.addView(subtitle);}
  }
  private void renderHome(LinearLayout box){
-  TextView heading=text("Your driving dashboard",25,TEXT);heading.setTypeface(null,Typeface.BOLD);spaced(box,heading,-2);
+
   homeGps=text(location.snapshot().statusText(),13,GREEN);spaced(box,homeGps,-2);
   homeDestination(box,"Map","Your location and offline navigation",NavigationState.MAP,true);
   LinearLayout quick=new LinearLayout(this);Button routes=button("Routes",false),importGpx=button("Import GPX",false);
@@ -409,9 +418,9 @@ public class MainActivity extends Activity {
    Button resume=button(followingGpx?"Resume route":"View route",false);active.addView(resume,new LinearLayout.LayoutParams(-1,dp(48)));
    resume.setOnClickListener(v->{openScreen(NavigationState.MAP);if(!followingGpx)map.focusGpxRoute();});spaced(box,active,-2);
   }else if(!TripPlan.load(this).isEmpty()){Button resume=button("Resume planned stops",false);spaced(box,resume,52);resume.setOnClickListener(v->openScreen(NavigationState.MAP));}
-  ConvoyService s=ConvoyService.current;
-  Button convoy=button(s!=null&&s.active?"Open active convoy":"Start / Join Convoy",false);convoy.setContentDescription("Start or join convoy");spaced(box,convoy,56);
-  convoy.setOnClickListener(v->{if(ConvoyService.current!=null)openScreen(NavigationState.CREW);else setup();});
+  ConvoyService s=ConvoyService.current;homeActiveShown=s!=null&&s.active;
+  if(s==null||!s.active){LinearLayout convoyActions=new LinearLayout(this);Button start=button("Start Convoy",true),join=button("Join Convoy",false);LinearLayout.LayoutParams c=new LinearLayout.LayoutParams(0,dp(56),1);c.rightMargin=dp(8);convoyActions.addView(start,c);convoyActions.addView(join,new LinearLayout.LayoutParams(0,dp(56),1));spaced(box,convoyActions,56);start.setOnClickListener(v->onboarding.start());join.setOnClickListener(v->onboarding.joinMenu());}
+  else{Button crewActive=button("Open Crew",true);spaced(box,crewActive,52);crewActive.setOnClickListener(v->openScreen(NavigationState.CREW));if(s.host&&s.secureSession()){Button invite=button("Show Invite",false);spaced(box,invite,52);invite.setOnClickListener(v->onboarding.showInvite());}Button end=button("End Convoy",false);spaced(box,end,48);end.setOnClickListener(v->onboarding.end());}
   homeConvoy=text("",12,MUTED);spaced(box,homeConvoy,-2);
   LinearLayout more=new LinearLayout(this);Button crew=button("Crew",false),maps=button("Offline Maps",false);
   LinearLayout.LayoutParams moreHalf=new LinearLayout.LayoutParams(0,dp(52),1);moreHalf.rightMargin=dp(8);more.addView(crew,moreHalf);more.addView(maps,new LinearLayout.LayoutParams(0,dp(52),1));spaced(box,more,52);
@@ -423,7 +432,7 @@ public class MainActivity extends Activity {
   if(homeGps!=null)updateText(homeGps,location.snapshot().statusText());
   if(homeMap!=null)updateText(homeMap,"Offline map • "+selectedMapName());
   ConvoyService s=ConvoyService.current;
-  if(homeConvoy!=null)updateText(homeConvoy,s==null||!s.active?"Local mode • your location stays on this phone":(s.host?"Hosting":"Joined")+" • "+s.members.size()+" other car(s) • "+s.connectionCount()+" link(s)");
+  if(homeConvoy!=null)updateText(homeConvoy,s==null||!s.active?"Local mode • your location stays on this phone":s.sessionTitle()+" • "+(1+s.members.size())+" driver(s) connected");
   if(homeRoute!=null&&activeGpx!=null){GpxRoute.Progress p=map.getGpxProgress();updateText(homeRoute,activeGpx.name+"\n"+(followingGpx?"Following GPX track":"Saved route ready")+(p==null?" • "+formatDistance((float)activeGpx.totalMeters):" • "+formatDistance((float)p.remainingMeters)+" remaining"));}
  }
  private String selectedMapName(){for(MapPack pack:installedMaps)if(pack.selected)return pack.name;return "Shrewsbury development region";}
@@ -432,7 +441,7 @@ public class MainActivity extends Activity {
    mapPacks.migrateLegacy(getSharedPreferences("convoy",0).getString("mapName","Imported vector region"));
    List<RouteLibrary.Entry> routes=routeLibrary.list();String id=routeLibrary.activeId();GpxRoute active=routeLibrary.activeRoute();boolean follow=routeLibrary.isFollowing();
    List<MapPack> packs=mapPacks.list();long bytes=mapPacks.storageBytes();
-   runOnUiThread(()->{if(isDestroyed()||isFinishing())return;savedRoutes=routes;activeGpxId=id==null?"":id;activeGpx=active;followingGpx=follow;installedMaps=packs;mapStorageBytes=bytes;storageReady=true;map.setGpxRoute(active,follow);if(tab!=NavigationState.MAP)renderTab();else updateNavigationBanner();});
+   runOnUiThread(()->{if(isDestroyed()||isFinishing())return;savedRoutes=routes;activeGpxId=id==null?"":id;activeGpx=active;followingGpx=follow;installedMaps=packs;mapStorageBytes=bytes;storageReady=true;offlineMaps.refresh();map.setGpxRoute(active,follow);if(tab!=NavigationState.MAP)renderTab();else updateNavigationBanner();});
   }catch(Exception e){runOnUiThread(()->alert("Could not read saved offline data: "+e.getMessage()));}});
  }
  private String routeMetadata(RouteLibrary.Entry entry){return formatDistance((float)entry.totalMeters)+" • GPX • "+entry.segmentCount+" segment(s)";}
@@ -527,7 +536,7 @@ public class MainActivity extends Activity {
   try{startActivityForResult(intent,9);}catch(Exception e){alert("No document picker is available on this device.");}
  }
  private void selectMap(MapPack pack){storageWorker.execute(()->{try{mapPacks.select(pack.id);runOnUiThread(()->{map.reloadSelectedMap();openScreen(NavigationState.MAP);});refreshStoredData();}catch(Exception e){runOnUiThread(()->alert("Could not select this map: "+e.getMessage()));}});}
- private void removeMap(MapPack pack){new AlertDialog.Builder(this).setTitle("Remove "+pack.name+"?").setMessage("The imported map will be removed from this phone. GPX routes and convoy stops are kept.").setNegativeButton("Cancel",null).setPositiveButton("Remove",(d,w)->storageWorker.execute(()->{try{mapPacks.remove(pack.id);runOnUiThread(()->map.reloadSelectedMap());refreshStoredData();}catch(Exception e){runOnUiThread(()->alert("Could not remove this map: "+e.getMessage()));}})).show();}
+ private void removeMap(MapPack pack){MapDownloadWorker.cancel(this,pack.regionId);new AlertDialog.Builder(this).setTitle("Remove "+pack.name+"?").setMessage("The imported map will be removed from this phone. GPX routes and convoy stops are kept.").setNegativeButton("Cancel",null).setPositiveButton("Remove",(d,w)->storageWorker.execute(()->{try{mapPacks.remove(pack.id);runOnUiThread(()->map.reloadSelectedMap());refreshStoredData();}catch(Exception e){runOnUiThread(()->alert("Could not remove this map: "+e.getMessage()));}})).show();}
  private void chooseCar(){
   String[] names={"Mazda MX-5 NC PRHT","Toyota GT86","Skyline R34","Supra Mk4","Honda NSX","Impreza GC8","Lancer Evo VI","AE86 Trueno","350Z","MX-5 NA","Generic car"};
   String[] keys={"nc","gt86","r34","supra","nsx","gc8","evo6","ae86","z350","na","generic"};String saved=getPreferences(0).getString("car","nc");int selected=0;for(int i=0;i<keys.length;i++)if(keys[i].equals(saved))selected=i;
@@ -539,8 +548,7 @@ public class MainActivity extends Activity {
   if(s==null){
    rows.add("Your crew appears here");rows.add("Start or join a trip to share positions.");
   }else{
-   rows.add(s.myName+" • you");rows.add((s.host?"Host":"Member")+" · "+(s.bluetooth?"Bluetooth":"Wi-Fi")+" · "+s.connectionCount()+" direct link(s)");
-   if(s.host&&!s.bluetooth){rows.add("Wi-Fi details");rows.add((s.hotspotInfo.isEmpty()?"Using existing Wi-Fi / hotspot":s.hotspotInfo)+"\n\nHost IP addresses:\n"+s.addresses()+"\n\nUse the address belonging to the hotspot / Wi-Fi interface.");}
+   rows.add(s.myName+" • you");rows.add((s.host?"Host":"Member")+" • "+(1+s.members.size())+" driver(s) • encrypted local convoy");
    ArrayList<ConvoyService.Member> list=new ArrayList<>(s.members.values());list.sort(Comparator.comparing(m->m.name));
    for(ConvoyService.Member m:list){
     long seen=Math.max(0,(SystemClock.elapsedRealtime()-m.received)/1000);
@@ -549,7 +557,7 @@ public class MainActivity extends Activity {
      long age=m.age();line+=(age>15000?"STALE GPS":"Fresh GPS")+" · "+(age/5000*5)+"s+ old · ±"+Math.round(m.accuracy)+" m\n"+String.format(Locale.US,"%.5f, %.5f",m.lat,m.lon);
      if(s.fix!=null){float[] distance=new float[1];android.location.Location.distanceBetween(s.fix.getLatitude(),s.fix.getLongitude(),m.lat,m.lon,distance);line+="\nLast-position distance: "+(distance[0]<1000?Math.round(distance[0])+" m":String.format(Locale.US,"%.1f km",distance[0]/1000));}
     }else line+="Waiting for this phone's GPS fix";
-    rows.add(m.name);rows.add(line);
+    rows.add(m.name+" • "+m.car);rows.add(line);
    }
    if(list.isEmpty()){rows.add("Waiting for friends");rows.add("Keep the app open on each phone while connecting.");}
    muteLabel=s.muted?"Unmute received voice":"Mute received voice";
@@ -558,16 +566,17 @@ public class MainActivity extends Activity {
   if(crewSnapshotService==s&&crewSnapshot.equals(next))return;
   crewSnapshotService=s;crewSnapshot=next;crewPanel.removeAllViews();
   for(int i=0;i<rows.size();i+=2)addSection(crewPanel,rows.get(i),rows.get(i+1));
+  if(s!=null&&s.host&&s.secureSession()){Button invite=button("Invite drivers",true);spaced(crewPanel,invite,52);invite.setOnClickListener(v->onboarding.showInvite());}
   if(s!=null){Button mute=button(muteLabel,false);crewPanel.addView(mute);mute.setOnClickListener(v->s.muted=!s.muted);}
  }
  private final Runnable tick=new Runnable(){public void run(){
   // Dialogs have their own focused window. Do not invalidate the covered activity
   // or emit duplicate accessibility changes while the user is completing a form.
   if(!hasWindowFocus()){handler.postDelayed(this,1000);return;}
-  ConvoyService s=ConvoyService.current;boolean running=s!=null&&s.active;
+  ConvoyService s=ConvoyService.current;boolean running=s!=null&&s.active;if(tab==NavigationState.HOME&&homeActiveShown!=running)renderTab();
   if(running){
-   hadTrip=true;if((getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)==0)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);updateText(trip,"End trip");
-   updateText(status,s.status);updateText(detail,s.detail.isEmpty()?"Group ready · share your key privately":s.detail);
+   hadTrip=true;if((getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)==0)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);updateText(trip,"Open Crew");
+   updateText(status,s.status);updateText(detail,s.detail.isEmpty()?"Encrypted local convoy":s.detail);
    updateText(voice,!s.ptt&&s.connectionCount()==0?"Local voice · waiting for crew":s.muted?"Received voice muted":s.voiceStatus());updateText(vox,s.vox?"Hands-free\non":"Hands-free\noff");
    updateDescription(vox,s.vox?"Hands-free voice enabled. Tap to disable":"Enable hands-free voice");
    updateText(gps,location.snapshot().statusText());
@@ -575,7 +584,7 @@ public class MainActivity extends Activity {
    updateText(crewSummary,fresh+" crew · "+s.connectionCount()+" link(s)");
   }else{
    boolean localNavigation=tab==NavigationState.MAP&&(followingGpx||(map.getTargetName()!=null&&!map.getTargetName().isEmpty()));
-   if(localNavigation)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else if((getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)!=0)getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);updateText(trip,"Start trip");
+   if(localNavigation)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else if((getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)!=0)getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);updateText(trip,"Start Convoy");
    updateText(status,hadTrip?"Trip ended · map stays offline":"Offline. Together.");
    updateText(detail,"No mobile signal needed. Set up together before driving.");
    updateText(voice,"Local voice · start a trip");updateText(gps,location.snapshot().statusText());
@@ -587,7 +596,7 @@ public class MainActivity extends Activity {
   if(!ptt.isEnabled()&&s!=null)s.ptt=false;
   updateText(ptt,running&&s.ptt?(pttPhysicalDown?"Release to listen":"Tap to finish talking"):"Hold to talk");
   updateDescription(ptt,running&&s.ptt?"Talking. Release or click to stop transmitting":"Hold to transmit voice. Accessibility click toggles talking on or off.");
-  map.refresh();updateNavigationBanner();updateHomeStatus();updateVoiceVisibility();updateCrew();handler.postDelayed(this,1000);
+  map.refresh();if(!map.mapCoverageNotice().isEmpty())updateText(crewSummary,map.mapCoverageNotice());updateToolbar();offlineMaps.tickLocation();updateNavigationBanner();updateHomeStatus();updateVoiceVisibility();updateCrew();handler.postDelayed(this,1000);
  }};
  private void updateNavigationBanner(){
   if(navPrimary==null||navSecondary==null||routeSummary==null)return;
@@ -637,12 +646,13 @@ public class MainActivity extends Activity {
  @Override protected void onPause(){resumed=false;updateLocationLease();handler.removeCallbacks(tick);ConvoyService s=ConvoyService.current;if(s!=null)s.ptt=false;pttPhysicalDown=false;map.onPause();super.onPause();}
  @Override protected void onStop(){map.onStop();super.onStop();}
  @Override public void onLowMemory(){super.onLowMemory();map.onLowMemory();}
- @Override protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);map.onSaveInstanceState(out);}
- @Override protected void onDestroy(){handler.removeCallbacks(tick);if(instrumentDialog!=null)instrumentDialog.dismiss();location.setForegroundClient(this,false);storageWorker.shutdownNow();if(Build.VERSION.SDK_INT>=33&&backCallback!=null)getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);map.dispose();super.onDestroy();}
+ @Override protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);out.putInt("screen",navigation.screen());out.putInt("detailParent",navigation.detailParent());out.putString("detailRouteId",detailRouteId);map.onSaveInstanceState(out);}
+ @Override protected void onDestroy(){handler.removeCallbacks(tick);if(onboarding!=null)onboarding.close();if(offlineMaps!=null)offlineMaps.close();if(instrumentDialog!=null)instrumentDialog.dismiss();location.setForegroundClient(this,false);storageWorker.shutdownNow();if(Build.VERSION.SDK_INT>=33&&backCallback!=null)getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);map.dispose();super.onDestroy();}
  private EditText field(LinearLayout box,String label,String value,boolean secret){box.addView(text(label,12,MUTED));EditText e=new EditText(this);e.setTextColor(TEXT);e.setSingleLine(true);e.setText(value);e.setTextSize(16);if(secret)e.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);box.addView(e,new LinearLayout.LayoutParams(-1,dp(50)));return e;}
  private String randomKey(){byte[] b=new byte[8];new SecureRandom().nextBytes(b);StringBuilder s=new StringBuilder();for(byte x:b)s.append(String.format(Locale.US,"%02x",x));return s.toString();}
- private void setup(){ScrollView scroll=new ScrollView(this);LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(22),dp(12),dp(22),dp(8));scroll.addView(box);EditText name=field(box,"Your name (max 32 characters)",getPreferences(0).getString("name",""),false);box.addView(text("Your car icon",12,MUTED));Spinner car=new Spinner(this);String[] carNames={"MX-5 NC PRHT","Toyota GT86","Skyline R34","Supra Mk4","Honda NSX","Impreza GC8","Lancer Evo VI","AE86 Trueno","350Z","MX-5 NA","Generic car"};String[] carKeys={"nc","gt86","r34","supra","nsx","gc8","evo6","ae86","z350","na","generic"};car.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,carNames));String savedCar=getPreferences(0).getString("car","nc");for(int ci=0;ci<carKeys.length;ci++)if(carKeys[ci].equals(savedCar))car.setSelection(ci);box.addView(car);Spinner role=new Spinner(this);role.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Host a convoy","Join a convoy"}));box.addView(role);Spinner transport=new Spinner(this);transport.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Wi-Fi hotspot / local network","Paired Bluetooth"}));box.addView(transport);EditText key=field(box,"Group key • everyone must enter exactly the same key",randomKey(),true);box.addView(text("Keep the generated key when hosting. Replace it with your host’s key when joining.",12,MUTED));EditText ip=field(box,"Host IPv4 address • needed only to join Wi-Fi",getPreferences(0).getString("ip",""),false);ip.setHint("e.g. 192.168.43.1");ip.setHintTextColor(MUTED);CheckBox hotspot=new CheckBox(this);hotspot.setText("Create a local Wi-Fi hotspot when hosting");hotspot.setTextColor(TEXT);hotspot.setChecked(true);box.addView(hotspot);box.addView(text("Set up while parked. This build needs real-device range and audio testing before a remote trip.",12,MUTED));
- AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Bring your crew together").setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Continue",null).create();dialog.setOnShowListener(d->dialog.getButton(-1).setOnClickListener(v->{String n=name.getText().toString().trim(),k=key.getText().toString(),addr=ip.getText().toString().trim();boolean hosting=role.getSelectedItemPosition()==0,bt=transport.getSelectedItemPosition()==1;String chosenCar=carKeys[car.getSelectedItemPosition()];if(n.isEmpty()||n.length()>32){name.setError("Enter 1–32 characters");return;}if(k.length()<12||k.length()>128){key.setError("Use a key of 12–128 characters");return;}if(!hosting&&!bt&&!validIp(addr)){ip.setError("Enter the host’s IPv4 address from its Crew tab");return;}getPreferences(0).edit().putString("name",n).putString("ip",addr).putString("car",chosenCar).apply();Runnable begin=()->{if(bt&&!hosting)pickBluetooth(n,k,chosenCar);else launch(n,k,hosting,bt,addr,hotspot.isChecked(),chosenCar);};dialog.dismiss();permissions(bt,hosting&&!bt&&hotspot.isChecked(),begin);}));dialog.show();}
+ private void setup(){onboarding.start();}
+ private void advancedSetup(){ScrollView scroll=new ScrollView(this);LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(22),dp(12),dp(22),dp(8));scroll.addView(box);EditText name=field(box,"Your name (max 32 characters)",getPreferences(0).getString("name",""),false);box.addView(text("Your car icon",12,MUTED));Spinner car=new Spinner(this);String[] carNames={"MX-5 NC PRHT","Toyota GT86","Skyline R34","Supra Mk4","Honda NSX","Impreza GC8","Lancer Evo VI","AE86 Trueno","350Z","MX-5 NA","Generic car"};String[] carKeys={"nc","gt86","r34","supra","nsx","gc8","evo6","ae86","z350","na","generic"};car.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,carNames));String savedCar=getPreferences(0).getString("car","nc");for(int ci=0;ci<carKeys.length;ci++)if(carKeys[ci].equals(savedCar))car.setSelection(ci);box.addView(car);Spinner role=new Spinner(this);role.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Host a convoy","Join a convoy"}));box.addView(role);Spinner transport=new Spinner(this);transport.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Wi-Fi hotspot / local network","Paired Bluetooth"}));box.addView(transport);EditText key=field(box,"Group key • everyone must enter exactly the same key",randomKey(),true);box.addView(text("Keep the generated key when hosting. Replace it with your host’s key when joining.",12,MUTED));EditText ip=field(box,"Host IPv4 address • needed only to join Wi-Fi",getPreferences(0).getString("ip",""),false);ip.setHint("e.g. 192.168.43.1");ip.setHintTextColor(MUTED);CheckBox hotspot=new CheckBox(this);hotspot.setText("Create a local Wi-Fi hotspot when hosting");hotspot.setTextColor(TEXT);hotspot.setChecked(true);box.addView(hotspot);box.addView(text("Set up while parked. This build needs real-device range and audio testing before a remote trip.",12,MUTED));
+ AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Advanced connection").setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Continue",null).create();dialog.setOnShowListener(d->dialog.getButton(-1).setOnClickListener(v->{String n=name.getText().toString().trim(),k=key.getText().toString(),addr=ip.getText().toString().trim();boolean hosting=role.getSelectedItemPosition()==0,bt=transport.getSelectedItemPosition()==1;String chosenCar=carKeys[car.getSelectedItemPosition()];if(n.isEmpty()||n.length()>32){name.setError("Enter 1–32 characters");return;}if(k.length()<12||k.length()>128){key.setError("Use a key of 12–128 characters");return;}if(!hosting&&!bt&&!validIp(addr)){ip.setError("Enter the host’s IPv4 address from its Crew tab");return;}getPreferences(0).edit().putString("name",n).putString("ip",addr).putString("car",chosenCar).apply();Runnable begin=()->{if(bt&&!hosting)pickBluetooth(n,k,chosenCar);else launch(n,k,hosting,bt,addr,hotspot.isChecked(),chosenCar);};dialog.dismiss();permissions(bt,hosting&&!bt&&hotspot.isChecked(),begin);}));dialog.show();}
  private boolean validIp(String value){String[] a=value.split("\\.");if(a.length!=4)return false;try{for(String x:a){int n=Integer.parseInt(x);if(n<0||n>255)return false;}return true;}catch(Exception e){return false;}}
  private boolean ensureVoice(ConvoyService service){
   if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},7);return false;}
@@ -708,6 +718,7 @@ public class MainActivity extends Activity {
  private void chooseMap(){openScreen(NavigationState.OFFLINE_MAPS);}
  @Override protected void onActivityResult(int req,int result,Intent data){
   super.onActivityResult(req,result,data);
+  com.google.zxing.integration.android.IntentResult scan=com.google.zxing.integration.android.IntentIntegrator.parseActivityResult(req,result,data);if(scan!=null){if(scan.getContents()!=null)onboarding.acceptLink(scan.getContents());return;}
   if(result!=RESULT_OK||data==null||data.getData()==null)return;
   Uri uri=data.getData();
   if(req==10){if(!gpxImporting)importGpx(uri);return;}
@@ -718,7 +729,7 @@ public class MainActivity extends Activity {
   storageWorker.execute(()->{
    try{
     String name=documentName(uri,"Imported vector map");final long[] lastProgress={0};
-    MapPackStore.Progress progress=bytes->{long now=SystemClock.elapsedRealtime();if(now-lastProgress[0]<500)return;lastProgress[0]=now;runOnUiThread(()->{mapImportBytes=bytes;if(mapImportStatus!=null)updateText(mapImportStatus,"Importing map • "+formatBytes(bytes)+" copied");});};
+    MapPackStore.Progress progress=bytes->{long now=SystemClock.elapsedRealtime();if(now-lastProgress[0]<500)return;lastProgress[0]=now;runOnUiThread(()->{mapImportBytes=bytes;offlineMaps.setImportProgress(importing,bytes);if(mapImportStatus!=null)updateText(mapImportStatus,"Importing map • "+formatBytes(bytes)+" copied");});};
     try(InputStream input=getContentResolver().openInputStream(uri)){
      if(input==null)throw new IOException("Could not read that document");
      if(replacement==null)mapPacks.importPack(input,name,region,progress);else mapPacks.replacePack(input,name,replacement,progress);

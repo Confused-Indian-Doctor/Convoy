@@ -15,7 +15,20 @@ public class ConvoyService extends Service {
  public volatile boolean active=false,host=false, bluetooth=false,ptt=false,vox=false,muted=false,transmitting=false;
  public volatile boolean voiceEnabled=false;
  public volatile Location fix; public String myId,myName,myCar="generic";
- private byte[] key;private String address;private final CopyOnWriteArrayList<Link> links=new CopyOnWriteArrayList<>();
+ private byte[] key;private String address;
+ private ConvoySession session;private ConvoyInvite joiningInvite,cachedInvite;
+ private byte[] resumptionToken;private String cachedInviteState="";
+ private LanDiscovery discovery;private HotspotBootstrap bootstrap;private volatile LanDiscovery.Endpoint endpoint;
+ private volatile ConvoyInvite.Network invitationNetwork=ConvoyInvite.Network.lan();private volatile boolean networkReady=false,consumer=false;
+ public boolean secureSession(){return consumer&&session!=null&&session.isActive();}
+ public boolean accepting(){return session!=null&&session.isAccepting();}
+ public void setAccepting(boolean value){if(session!=null){try{session.setAccepting(value);}catch(IOException invalid){return;}cachedInvite=null;cachedInviteState="";advertiseSession();}}
+ public String sessionTitle(){return session!=null?session.convoyName:joiningInvite!=null?joiningInvite.convoyName:"Convoy";}
+ public synchronized String inviteLink()throws IOException{if(!secureSession()||!accepting()||!networkReady||server==null)return "";String state=invitationNetwork.mode+"|"+invitationNetwork.ssid+"|"+members.size()+"|"+server.getLocalPort();if(cachedInvite==null||!state.equals(cachedInviteState)){cachedInvite=session.createInvite(invitationNetwork,server.getLocalPort(),1+members.size(),System.currentTimeMillis());cachedInviteState=state;}return cachedInvite.toUri();}
+ public String connectionDiagnostics(){return status+"\nTransport: "+(bluetooth?"Bluetooth":"Local Wi-Fi/LAN")+"\n"+addresses()+"\nPort: "+(server!=null?server.getLocalPort():endpoint!=null?endpoint.port:Wire.PORT)+"\nSession: "+(session!=null?session.sessionId:joiningInvite!=null?joiningInvite.sessionId:"Legacy")+"\nDiscovery: "+(discovery==null?"Not active":discovery.status())+"\nProtocol: "+ConvoyInvite.VERSION+"\n"+detail;}
+ private void advertiseSession(){if(!active||!host||session==null||server==null||discovery==null)return;try{discovery.advertise(new LanAdvertisement(session.sessionId,ConvoyInvite.VERSION,session.convoyName,1+members.size(),session.isAccepting(),server.getLocalPort()));}catch(IOException e){detail="Local discovery is unavailable. Try reconnecting to the same Wi-Fi.";}}
+ private void startDiscovery(Network network){if(discovery==null)return;try{discovery.discover(joiningInvite.sessionId,ConvoyInvite.VERSION,network);}catch(IOException unavailable){detail="Could not discover your host. Check that everyone is on the same local Wi-Fi.";}}
+private final CopyOnWriteArrayList<Link> links=new CopyOnWriteArrayList<>();
  private final Set<Closeable> pending=ConcurrentHashMap.newKeySet();
  private final ExecutorService workers=Executors.newCachedThreadPool();private final Handler main=new Handler(Looper.getMainLooper());
  private ServerSocket server;private BluetoothServerSocket btServer;private CurrentLocation location;
@@ -54,8 +67,19 @@ public class ConvoyService extends Service {
    workers.execute(this::playLoop);
    if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)enableVoice();
    String pass=intent.getStringExtra("key");boolean autoHotspot=intent.getBooleanExtra("hotspot",false);
-   workers.execute(()->{try{key=Wire.groupKey(pass);if(!active)return;if(host){if(bluetooth)hostBluetooth();else hostWifi();}else joinLoop();}catch(Exception e){status="Could not start connection";detail=message(e);}});
-   if(host&&!bluetooth&&autoHotspot&&wm!=null)try{startAutomaticHotspot(wm);}catch(RuntimeException e){detail="Automatic hotspot unavailable. Use a manual hotspot or local Wi-Fi: "+message(e);}
+   consumer=intent.getBooleanExtra("consumer",false);
+   if(consumer){
+    if(host){session=ConvoySession.create(myId,myName,System.currentTimeMillis());key=session.groupKey();networkReady=!autoHotspot;}
+    else{joiningInvite=ConvoyInvite.decode(intent.getStringExtra("invitation"),System.currentTimeMillis());key=joiningInvite.groupKey();bluetooth=joiningInvite.network.mode==ConvoyInvite.Mode.BLUETOOTH;if(bluetooth)address=joiningInvite.network.bluetoothAddress;}
+    discovery=new LanDiscovery(this,new LanDiscovery.Listener(){@Override public void onResolved(LanDiscovery.Endpoint resolved){if(joiningInvite!=null&&joiningInvite.sessionId.equals(resolved.metadata.sessionId))endpoint=resolved;}@Override public void onLost(String id){if(joiningInvite!=null&&joiningInvite.sessionId.equals(id))endpoint=null;}@Override public void onNetworkChanged(){if(!host){endpoint=null;detail="Local network changed • finding convoy again";}else advertiseSession();}});
+    if(!host&&!bluetooth){
+     if(joiningInvite.network.mode==ConvoyInvite.Mode.HOTSPOT){bootstrap=new HotspotBootstrap(this);bootstrap.request(joiningInvite.network.ssid,joiningInvite.network.password(),joiningInvite.network.wpa3,new HotspotBootstrap.Listener(){@Override public void onAvailable(Network network){startDiscovery(network);}@Override public void onUnavailable(String reason){status="Wi-Fi connection needed";detail="Allow the Android Wi-Fi connection request, or join the host's Wi-Fi and try again.";}@Override public void onLost(){endpoint=null;status="Wi-Fi connection lost";}});}
+     else startDiscovery(null);
+    }
+   }
+
+   workers.execute(()->{try{if(!consumer)key=Wire.groupKey(pass);if(!active)return;if(host){if(bluetooth)hostBluetooth();else hostWifi();}else joinLoop();}catch(Exception e){status="Could not start connection";detail=message(e);}});
+   if(host&&!bluetooth&&autoHotspot&&wm!=null)try{startAutomaticHotspot(wm);}catch(RuntimeException e){networkReady=true;detail="Automatic hotspot unavailable. Connect everyone to the same local Wi-Fi/router.";}
    main.post(heartbeat);
   }catch(Exception e){status="Permission or device error";detail=message(e);stopSelf();}
   return START_NOT_STICKY;
@@ -80,8 +104,8 @@ public class ConvoyService extends Service {
   if(Build.VERSION.SDK_INT>=33){if(checkSelfPermission(Manifest.permission.NEARBY_WIFI_DEVICES)!=PackageManager.PERMISSION_GRANTED)throw new SecurityException("Allow Nearby Wi-Fi devices for an automatic hotspot.");}
   else if(checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED)throw new SecurityException("Allow precise Location for an automatic hotspot.");
   wm.startLocalOnlyHotspot(new WifiManager.LocalOnlyHotspotCallback(){
-   @Override public void onStarted(WifiManager.LocalOnlyHotspotReservation r){if(!active){r.close();return;}hotspot=r;if(Build.VERSION.SDK_INT>=30){SoftApConfiguration c=r.getSoftApConfiguration();hotspotInfo="Wi-Fi: "+c.getSsid()+"\nPassword: "+c.getPassphrase();}else{android.net.wifi.WifiConfiguration c=r.getWifiConfiguration();hotspotInfo="Wi-Fi: "+c.SSID+"\nPassword: "+c.preSharedKey;}detail="Ask friends to join this Wi-Fi, then enter this phone’s IP below.";}
-   @Override public void onFailed(int reason){detail="Automatic hotspot unavailable ("+reason+"). Turn on your phone’s hotspot manually, or use Bluetooth.";}
+   @Override public void onStarted(WifiManager.LocalOnlyHotspotReservation r){if(!active){r.close();return;}hotspot=r;try{String ssid,password;boolean wpa3=false;if(Build.VERSION.SDK_INT>=30){SoftApConfiguration c=r.getSoftApConfiguration();ssid=c.getSsid();password=c.getPassphrase();wpa3=c.getSecurityType()==SoftApConfiguration.SECURITY_TYPE_WPA3_SAE;}else{android.net.wifi.WifiConfiguration c=r.getWifiConfiguration();ssid=c.SSID;password=c.preSharedKey;if(ssid!=null&&ssid.startsWith("\""))ssid=ssid.substring(1,ssid.length()-1);if(password!=null&&password.startsWith("\""))password=password.substring(1,password.length()-1);}if(consumer){invitationNetwork=ConvoyInvite.Network.hotspot(ssid,password,wpa3);hotspotInfo="Local convoy Wi-Fi ready";}else hotspotInfo="Wi-Fi: "+ssid+"\nPassword: "+password;networkReady=true;cachedInvite=null;advertiseSession();detail="Friends can scan your invite to request joining this local Wi-Fi.";}catch(Exception invalid){detail="Could not prepare Wi-Fi invitation. Use an existing local Wi-Fi network.";}}
+   @Override public void onFailed(int reason){networkReady=true;invitationNetwork=ConvoyInvite.Network.lan();detail="Automatic hotspot unavailable. Connect everyone to the same Wi-Fi/router, then scan the invite.";}
    @Override public void onStopped(){hotspotInfo="Hotspot stopped. Reconnect Wi-Fi or restart trip.";}
   },main);
  }
@@ -90,7 +114,7 @@ public class ConvoyService extends Service {
   Wire.Packet p=new Wire.Packet();p.type=1;p.id=myId;p.name=myName;p.car=myCar;Location f=fix;
   if(f==null){p.fixAge=-1;p.lat=0;p.lon=0;p.accuracy=0;}else{p.fixAge=Math.max(0,(SystemClock.elapsedRealtimeNanos()-f.getElapsedRealtimeNanos())/1000000);p.lat=f.getLatitude();p.lon=f.getLongitude();p.accuracy=f.getAccuracy();}
   broadcast(p.encode(),null);
-  long now=SystemClock.elapsedRealtime();for(Link l:links)if(now-l.lastRead>10000)l.close();
+  if(consumer&&host)advertiseSession();long now=SystemClock.elapsedRealtime();for(Link l:links)if(now-l.lastRead>10000)l.close();
   // Bound departed convoy state without erasing the immediately useful last known position.
   for(Member m:members.values())if(now-m.received>30*60*1000L)members.remove(m.id,m);
  }catch(Exception e){detail=message(e);}main.postDelayed(this,2000);}};
@@ -98,7 +122,7 @@ public class ConvoyService extends Service {
  @SuppressLint("MissingPermission")
  private BluetoothAdapter adapter()throws IOException{requireBluetoothPermission();BluetoothManager manager=getSystemService(BluetoothManager.class);BluetoothAdapter a=manager==null?null:manager.getAdapter();if(a==null||!a.isEnabled())throw new IOException("Turn on Bluetooth in Android settings");return a;}
  private void hostWifi()throws Exception{
-  server=new ServerSocket();server.setReuseAddress(true);server.bind(new InetSocketAddress(Wire.PORT));status="Hosting on Wi-Fi";
+  server=new ServerSocket();server.setReuseAddress(true);server.bind(new InetSocketAddress(consumer?0:Wire.PORT));status="Hosting on Wi-Fi";if(consumer)main.post(this::advertiseSession);
   while(active){Socket s=server.accept();s.setTcpNoDelay(true);s.setSoTimeout(12000);if(links.size()+pending.size()>=6){s.close();continue;}pending.add(s);workers.execute(()->connect(s,true));}
  }
  @SuppressLint("MissingPermission")
@@ -117,19 +141,21 @@ public class ConvoyService extends Service {
  private void joinLoop(){while(active){Closeable socket=null;try{
   status="Connecting to host…";
   if(bluetooth)socket=openBluetoothConnection();
-  else{Socket s=new Socket();socket=s;pending.add(s);ConnectivityManager cm=getSystemService(ConnectivityManager.class);for(Network n:cm.getAllNetworks()){NetworkCapabilities c=cm.getNetworkCapabilities(n);if(c!=null&&c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)){n.bindSocket(s);break;}}s.connect(new InetSocketAddress(address,Wire.PORT),7000);s.setTcpNoDelay(true);s.setSoTimeout(12000);}
+  else{Socket s=new Socket();socket=s;pending.add(s);if(consumer){LanDiscovery.Endpoint target=endpoint;if(target==null){status="Finding convoy on local Wi-Fi…";throw new IOException("Host discovery pending");}Network n=bootstrap!=null?bootstrap.network():target.network;if(n!=null)n.bindSocket(s);s.connect(new InetSocketAddress(target.host,target.port),7000);}else{ConnectivityManager cm=getSystemService(ConnectivityManager.class);for(Network n:cm.getAllNetworks()){NetworkCapabilities c=cm.getNetworkCapabilities(n);if(c!=null&&c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)){n.bindSocket(s);break;}}s.connect(new InetSocketAddress(address,Wire.PORT),7000);}s.setTcpNoDelay(true);s.setSoTimeout(12000);}
   if(active)connect(socket,false);
- }catch(Exception e){if(active){status="Disconnected • retrying";detail=message(e)+". Check range, host and group key.";}}
+ }catch(Exception e){if(active){status=consumer&&endpoint==null?"Finding convoy on local Wi-Fi…":"Disconnected • retrying";detail=consumer?"Keep the same local Wi-Fi connection. Waiting for the convoy host.":message(e)+". Check range, host and group key.";if(consumer&&discovery!=null)main.post(discovery::rediscover);}}
  finally{if(socket!=null){pending.remove(socket);closeSocket(socket);}}
  if(active)try{Thread.sleep(4000);}catch(InterruptedException e){return;}
  }}
  private void connect(Closeable socket,boolean serverSide){Runnable timeout=()->closeSocket(socket);main.postDelayed(timeout,12000);Link link=null;
   try{
    InputStream in;OutputStream out;if(socket instanceof Socket){in=((Socket)socket).getInputStream();out=((Socket)socket).getOutputStream();}else{in=((BluetoothSocket)socket).getInputStream();out=((BluetoothSocket)socket).getOutputStream();}
-   Wire.Channel channel=new Wire.Channel(in,out,key,serverSide);main.removeCallbacks(timeout);if(!active)return;
-   link=new Link(socket,channel);pending.remove(socket);links.add(link);status=host?"Hosting on "+(bluetooth?"Bluetooth":"Wi-Fi"):"Connected to convoy";detail="Encrypted local connection • no mobile data required";
+   Wire.Channel channel=new Wire.Channel(in,out,key,serverSide);String admittedId=null;
+   if(consumer){if(serverSide){InviteHandshake.Request request=InviteHandshake.readRequest(channel.receive(),System.currentTimeMillis());ConvoySession.AdmissionResult result=session.admit(request.invitation,request.driverId,request.resumptionToken(),System.currentTimeMillis());if(result.status==ConvoySession.Admission.NEEDS_APPROVAL)throw new IOException("Host approval required");channel.send(InviteHandshake.accepted(session,request,result.resumptionToken()));admittedId=request.driverId;}else{byte[] requestFrame=InviteHandshake.request(joiningInvite,myId,resumptionToken);channel.send(requestFrame);resumptionToken=InviteHandshake.verifyAccepted(channel.receive(),joiningInvite,requestFrame);}}
+   main.removeCallbacks(timeout);if(!active)return;
+   link=new Link(socket,channel);link.identity=admittedId;if(admittedId!=null)for(Link other:links)if(admittedId.equals(other.identity))other.close();pending.remove(socket);links.add(link);status=host?"Hosting on "+(bluetooth?"Bluetooth":"Wi-Fi"):"Connected to convoy";detail="Encrypted local connection • no mobile data required";
    final Link ready=link;workers.execute(ready::writeLoop);link.readLoop();
-  }catch(Exception e){if(active){detail="Connection ended: "+message(e);if(!host)status="Disconnected • retrying";}}
+  }catch(Exception e){if(active){detail=consumer?"Could not authenticate or retain the convoy connection. Ask the host for a fresh invite.":"Connection ended: "+message(e);if(!host)status="Disconnected • retrying";}}
   finally{main.removeCallbacks(timeout);pending.remove(socket);if(link!=null)link.close();else closeSocket(socket);}
  }
  private static void closeSocket(Closeable socket){try{socket.close();}catch(Exception ignored){}}
@@ -187,7 +213,7 @@ public class ConvoyService extends Service {
   AudioTrack t=player;if(t!=null)try{t.stop();t.flush();}catch(RuntimeException ignored){}
   for(Link l:links)l.close();for(Closeable c:pending)closeSocket(c);pending.clear();
   if(server!=null)closeSocket(server);if(btServer!=null)try{btServer.close();}catch(Exception ignored){}
-  if(hotspot!=null)hotspot.close();if(location!=null)location.setConvoyClient(this,null,false);
+  if(session!=null)session.close();cachedInvite=null;joiningInvite=null;if(key!=null)Arrays.fill(key,(byte)0);if(resumptionToken!=null)Arrays.fill(resumptionToken,(byte)0);if(discovery!=null)discovery.close();if(bootstrap!=null)bootstrap.close();if(hotspot!=null)hotspot.close();if(location!=null)location.setConvoyClient(this,null,false);
   if(audioManager!=null&&focusRequest!=null)audioManager.abandonAudioFocusRequest(focusRequest);
   if(wifiLock!=null&&wifiLock.isHeld())wifiLock.release();if(wakeLock!=null&&wakeLock.isHeld())wakeLock.release();
   workers.shutdownNow();playback.clear();members.clear();if(current==this)current=null;
