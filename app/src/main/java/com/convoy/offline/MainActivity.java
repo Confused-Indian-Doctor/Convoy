@@ -599,7 +599,7 @@ public class MainActivity extends Activity {
   if(!ptt.isEnabled()&&s!=null)s.ptt=false;
   updateText(ptt,running&&s.ptt?(pttPhysicalDown?"Release to listen":"Tap to finish talking"):"Hold to talk");
   updateDescription(ptt,running&&s.ptt?"Talking. Release or click to stop transmitting":"Hold to transmit voice. Accessibility click toggles talking on or off.");
-  map.refresh();String coverage=map.mapCoverageNotice();coverageDownload.setVisibility(coverage.isEmpty()||showInstruments?View.GONE:View.VISIBLE);if(!coverage.isEmpty()){updateText(coverageDownload,coverage);updateText(crewSummary,"Download map");}updateText(attributionLabel,"© OpenStreetMap · Protomaps"+(map.attribution.contains("Overture")?" · Overture":""));updateToolbar();offlineMaps.tickLocation();updateNavigationBanner();updateHomeStatus();updateVoiceVisibility();updateCrew();handler.postDelayed(this,1000);
+  map.refresh();String coverage=map.mapCoverageNotice();coverageDownload.setVisibility(coverage.isEmpty()||showInstruments?View.GONE:View.VISIBLE);if(!coverage.isEmpty()){updateText(coverageDownload,coverage);updateText(crewSummary,"Download map");}updateText(attributionLabel,"© OpenStreetMap · Protomaps"+(map.attribution.contains("Overture")?" · Overture":""));updateDescription(attributionLabel,"Offline map source: "+map.mapName);updateToolbar();offlineMaps.tickLocation();updateNavigationBanner();updateHomeStatus();updateVoiceVisibility();updateCrew();handler.postDelayed(this,1000);
  }};
  private void updateNavigationBanner(){
   if(navPrimary==null||navSecondary==null||routeSummary==null)return;

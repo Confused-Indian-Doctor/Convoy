@@ -13,10 +13,13 @@ private_dir="$(mktemp -d "${TMPDIR:-/tmp}/convoy-smoke.XXXXXX")"
 remote_ui="/sdcard/convoy-smoke-$$.xml"
 setup_open=false
 keep_gps_fresh=false
+smoke_gps_longitude=-2.7541
+smoke_gps_latitude=52.7078
 firewall_enabled=false
 offline_chain="CVY_SMOKE_$$"
 capture_diagnostics() {
   local result=$?
+  if [[ "$setup_open" == true ]]; then dump_ui >/dev/null 2>&1 && sanitize_setup_ui >/dev/null 2>&1 || true; fi
   record_logcat build/smoke/logcat.txt || true
   # Invite QR pixels, share previews and advanced group-key fields grant access.
   # Keep every such window out of public diagnostic screenshots.
@@ -117,9 +120,11 @@ PYANR
 }
 
 sanitize_setup_ui() {
-  python3 - "$private_dir/ui.xml" build/smoke/setup-ui-sanitized.xml <<'PYSANITIZE'
+  python3 - "$private_dir/ui.xml" build/smoke/setup-ui-sanitized.xml "$private_dir/redaction-values.json" <<'PYSANITIZE'
 import re
 import sys
+import json
+from pathlib import Path
 import xml.etree.ElementTree as ET
 
 tree = ET.parse(sys.argv[1])
@@ -130,6 +135,8 @@ with open(sys.argv[2].replace("setup-ui-sanitized.xml", "setup-field-lengths.txt
         lengths.write(f"field {index}: length={len(node.get('text', ''))}, focused={node.get('focused', 'false')}\n")
 values = {node.get(attribute, "") for node in edits for attribute in ("text", "content-desc", "hint")}
 values.discard("")
+previous=json.loads(Path(sys.argv[3]).read_text()) if Path(sys.argv[3]).exists() else []
+Path(sys.argv[3]).write_text(json.dumps(sorted(set(previous)|values)))
 for node in edits:
     for attribute in ("text", "content-desc", "hint"):
         node.attrib.pop(attribute, None)
@@ -150,11 +157,16 @@ PYSANITIZE
 record_logcat() {
   local destination=$1
   shift
-  adb logcat -d "$@" | python3 -c 'import re,sys
+  adb logcat -d "$@" | python3 -c 'import re,sys,json
+from pathlib import Path
 value=sys.stdin.read()
+p=Path(sys.argv[1])
+if p.is_file():
+ for secret in json.loads(p.read_text()):
+  if secret:value=value.replace(secret,"[redacted input]")
 value=re.sub(r"convoy://join/[A-Za-z0-9_-]+", "[redacted convoy invite]", value)
 value=re.sub(r"Q1ZJMQ[A-Za-z0-9_-]{100,1594}", "[redacted convoy invite]", value)
-sys.stdout.write(value)' > "$destination"
+sys.stdout.write(value)' "$private_dir/redaction-values.json" > "$destination"
 }
 
 assert_consumer_connection_ui() {
@@ -210,8 +222,11 @@ for node in nodes:
         or (mode == "description" and attrs.get("content-desc", "") == value)
         or (mode == "hotspot" and attrs.get("class") == "android.widget.CheckBox" and text == value)
         or (mode == "gps" and (text.startswith("GPS ·") or text.startswith("GPS •")))
+        or (mode == "gpx_progress" and text.startswith("Following GPX track")
+            and " remaining" in text and " off route" in text)
         or (mode == "transfer" and re.fullmatch(r"\d+(?:\.\d+)? (?:B|KiB|MiB|GiB) / .* · \d+%", text)
-            and not re.match(r"0(?:\.0)? (?:B|KiB|MiB|GiB) /", text))
+            and not re.match(r"0(?:\.0)? (?:B|KiB|MiB|GiB) /", text)
+            and not text.endswith(" · 100%"))
         or (mode == "eta" and re.fullmatch(r"\d+ min|\d+ h \d+ min", text))
         or (mode == "scroll" and attrs.get("class") == "android.widget.ScrollView")
     )
@@ -236,7 +251,7 @@ PYUI
 
 refresh_gps() {
   if [[ "$keep_gps_fresh" == true ]]; then
-    adb emu geo fix -2.7541 52.7078 >/dev/null
+    adb emu geo fix "$smoke_gps_longitude" "$smoke_gps_latitude" >/dev/null
   fi
 }
 
@@ -427,7 +442,13 @@ if len(visible) < 3:
 with open(sys.argv[2], "w") as output:
     output.write("PASS several UK map regions are visible in the compact list: " + str(len(visible)) + "\n")
 PYROWS
-adb emu network speed umts > build/smoke/download-network-throttle.txt
+# The emulator's modem bandwidth limit does not limit its separate virtual Wi-Fi link.
+# Use cellular for this observation, then restore full-speed Wi-Fi for complete installation.
+adb shell svc wifi disable
+adb shell svc data enable
+adb emu network speed edge > build/smoke/download-network-throttle.txt
+sleep 4
+adb shell dumpsys connectivity > build/smoke/download-cellular-connectivity.txt
 tap_control description 'Download Northern Ireland' 'real configured Northern Ireland source' true
 tap_control positive Download 'confirm real regional download'
 wait_control transfer '' 'actual nonzero regional download bytes' true 90 >/dev/null
@@ -449,6 +470,11 @@ tap_control positive Download 'confirm retry'
 wait_control transfer '' 'actual bytes on regional retry' true 90 >/dev/null
 tap_control description 'Cancel Northern Ireland' 'cancel retry safely' true
 wait_control prefix 'Download cancelled' 'retry cancelled without installing partial data' true >/dev/null
+adb emu network speed full >/dev/null
+adb shell svc wifi enable
+tap_control description 'Retry Northern Ireland' 'complete real regional map after retry' true
+tap_control positive Download 'confirm complete regional download'
+wait_control description 'Open Northern Ireland' 'complete verified regional PMTiles installed' true 180 >/dev/null
 tap_control description 'Download United Kingdom overview' 'real small UK overview source' true
 tap_control positive Download 'confirm UK overview download'
 wait_control description 'Open United Kingdom overview' 'verified overview installed by WorkManager' true 120 >/dev/null
@@ -460,7 +486,7 @@ assert_running real-map-download
 adb emu network speed full >/dev/null
 adb shell input keyevent 4
 wait_control text 'convoy' 'Home after installed overview' >/dev/null
-printf 'PASS actual hosted regional bytes/progress, background worker, cancel, retry and complete SHA-256-validated UK overview installation.\n' > build/smoke/map-download.txt
+printf 'PASS actual hosted regional bytes/progress, background worker, cancel/retry and complete SHA-256-validated Northern Ireland plus UK overview installation.\n' > build/smoke/map-download.txt
 
 # A fresh process now has no external IPv4/IPv6 access. All remaining regressions run offline.
 disable_external_network
@@ -563,6 +589,46 @@ adb shell input keyevent 4
 wait_control text 'convoy' 'Home after Advanced Back' >/dev/null
 setup_open=false
 printf 'PASS QR camera entry, nearby discovery UI and isolated Advanced connection. No real-phone scan or LAN interoperability is claimed.\n' >> build/smoke/consumer-join.txt
+
+# GPX works on a real downloaded regional basemap without Shrewsbury search/routing coverage.
+adb shell mkdir -p /sdcard/Download
+adb push tests/fixtures/belfast-regional-route.gpx /sdcard/Download/ConvoySmokeBelfast.gpx >/dev/null
+tap_control text Routes 'Routes for regional GPX'
+tap_control text 'Import GPX' 'document provider for Belfast GPX'
+tap_control text 'ConvoySmokeBelfast.gpx' 'Belfast GPX document' true
+wait_control text 'Convoy Belfast GPX' 'named multi-segment Belfast route imported' >/dev/null
+tap_control text 'Follow route' 'follow exact regional GPX'
+smoke_gps_longitude=-5.9322
+smoke_gps_latitude=54.5993
+adb emu geo fix "$smoke_gps_longitude" "$smoke_gps_latitude" >/dev/null
+wait_control gps '' 'standalone GPS over downloaded Northern Ireland' >/dev/null
+wait_control description 'Offline map source: Northern Ireland' 'actual regional MapLibre source selected' false 30 >/dev/null
+wait_control gpx_progress '' 'offline regional GPX progress and remaining distance' false 30 >/dev/null
+wait_service stopped
+assert_running regional-gpx
+dump_ui
+cp "$private_dir/ui.xml" build/smoke/belfast-regional-gpx.xml
+adb exec-out screencap -p > build/smoke/belfast-regional-gpx.png
+tap_control description 'Open GPX route details' 'regional GPX detail and rejoin controls'
+tap_control text 'Rejoin route' 'honest unavailable Belfast road-routing coverage' true
+wait_control prefix 'GPX track is' 'distance/direction to GPX without fabricating a road route' >/dev/null
+dump_ui
+python3 - "$private_dir/ui.xml" <<'PYREGIONAL'
+import re
+import sys
+import xml.etree.ElementTree as ET
+texts = [node.get("text", "") for node in ET.parse(sys.argv[1]).getroot().iter("node")]
+if not any("Offline routing data is not installed for this area" in text for text in texts):
+    sys.exit("Regional GPX did not explain the absence of driving-routing data.")
+if any(re.fullmatch(r"\d+ min|\d+ h \d+ min", text) for text in texts):
+    sys.exit("An unsupported GPX-only ETA appeared outside routing coverage.")
+PYREGIONAL
+tap_control positive OK 'close regional routing-coverage explanation'
+wait_service stopped
+adb shell input keyevent 4
+wait_control text 'convoy' 'Home after standalone regional GPX' >/dev/null
+printf 'PASS real Northern Ireland MapLibre source, two-segment GPX with waypoint, standalone GPS/progress and honest unavailable road routing, all with external networking blocked.\n' > build/smoke/regional-gpx.txt
+
 # Import an actual original through the Android document provider, then follow it.
 adb shell mkdir -p /sdcard/Download
 adb push tests/fixtures/smoke-route.gpx /sdcard/Download/ConvoySmoke.gpx >/dev/null
@@ -570,11 +636,23 @@ tap_control text Routes 'Routes for real GPX import'
 tap_control text 'Import GPX' 'GPX picker for fixture'
 tap_control text 'ConvoySmoke.gpx' 'local GPX document' true
 wait_control text 'Convoy smoke GPX' 'imported named GPX detail' >/dev/null
+smoke_gps_longitude=-2.7541
+smoke_gps_latitude=52.7078
+adb emu geo fix "$smoke_gps_longitude" "$smoke_gps_latitude" >/dev/null
 tap_control text 'Follow route' 'offline GPX following'
 wait_control prefix 'Following GPX track' 'GPX status on Map' >/dev/null
 wait_service stopped
 adb exec-out screencap -p > build/smoke/gpx-following.png
 printf 'PASS real Android-provider GPX import and map following without convoy.\n' > build/smoke/gpx-import.txt
+adb shell input keyevent 4
+wait_control text 'convoy' 'Home before checking saved route library' >/dev/null
+tap_control text Routes 'multiple offline GPX route library'
+wait_control text 'Convoy smoke GPX' 'Shrewsbury route remains saved' true >/dev/null
+wait_control text 'Convoy Belfast GPX' 'regional route remains independently saved' true >/dev/null
+adb shell input keyevent 4
+wait_control text 'convoy' 'Home after route-library verification' >/dev/null
+tap_control text Map 'restore followed Shrewsbury GPX'
+wait_control prefix 'Following GPX track' 'Shrewsbury GPX remains active after library browsing' >/dev/null
 # Import real bundled tile content as a separate custom pack through the same picker.
 python3 - "$apk" "$private_dir/ConvoySmokeMap.pmtiles" <<'PYMAP'
 import sys, zipfile
