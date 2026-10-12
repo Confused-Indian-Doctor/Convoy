@@ -9,7 +9,18 @@ public final class MapPackManifest {
     public static final int MAX_BYTES = 256 * 1024;
     public final List<MapPackSource> packs;
     public final int schemaVersion;
-    private MapPackManifest(List<MapPackSource> packs) { this.schemaVersion=1; this.packs=Collections.unmodifiableList(packs); }
+    private final long generatedEpochMillis;
+    private MapPackManifest(List<MapPackSource> packs,long generatedEpochMillis) { this.schemaVersion=1; this.packs=Collections.unmodifiableList(packs);this.generatedEpochMillis=generatedEpochMillis; }
+    /** App upgrades retain newer cached regions but never let an old cache hide a newer bundled pack. */
+    public static MapPackManifest preferNewest(MapPackManifest bundled,MapPackManifest cached) {
+        LinkedHashMap<String,MapPackSource> merged=new LinkedHashMap<>();
+        for(MapPackSource source:bundled.packs)merged.put(source.regionId,source);
+        for(MapPackSource source:cached.packs){MapPackSource previous=merged.get(source.regionId);
+            int date=previous==null?1:java.time.LocalDate.parse(source.dataDate).compareTo(java.time.LocalDate.parse(previous.dataDate));
+            if(previous==null||date>0||(date==0&&cached.generatedEpochMillis>=bundled.generatedEpochMillis))merged.put(source.regionId,source);
+        }
+        return new MapPackManifest(new ArrayList<>(merged.values()),Math.max(bundled.generatedEpochMillis,cached.generatedEpochMillis));
+    }
     public MapPackSource forRegion(String id) { for (MapPackSource source:packs) if(source.regionId.equals(id)||source.id.equals(id))return source;return null; }
     public static MapPackManifest parse(InputStream input) throws IOException {
         ByteArrayOutputStream output=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int n;
@@ -29,7 +40,11 @@ public final class MapPackManifest {
                     bounds,string(p,"attribution"),bool(p,"basemap"),bool(p,"pois"),bool(p,"search"),bool(p,"routing"));
             if(!ids.add(source.id)||!regions.add(source.regionId))throw new IOException("Duplicate map pack region");packs.add(source);
         }
-        return new MapPackManifest(packs);
+        long generated=0;Object timestamp=root.get("generated_at");
+        if(timestamp!=null){if(!(timestamp instanceof String))throw new IOException("Invalid map catalog generation time");
+            try{generated=java.time.OffsetDateTime.parse((String)timestamp).toInstant().toEpochMilli();}
+            catch(java.time.DateTimeException|ArithmeticException invalid){throw new IOException("Invalid map catalog generation time",invalid);}}
+        return new MapPackManifest(packs,generated);
     }
     @SuppressWarnings("unchecked") private static Map<String,Object> object(Object object)throws IOException{if(!(object instanceof Map))throw new IOException("Expected map manifest object");return(Map<String,Object>)object;}
     private static String string(Map<String,Object> object,String key)throws IOException{Object value=object.get(key);if(!(value instanceof String))throw new IOException("Missing map manifest "+key);return(String)value;}

@@ -10,9 +10,12 @@ public final class MapDownloads {
     public static final String MANIFEST_URL="https://github.com/Confused-Indian-Doctor/Convoy/releases/download/uk-maps-v1/uk-map-manifest.json";
     private MapDownloads(){}
     public static MapPackManifest loadManifest(Context context)throws IOException {
+        MapPackManifest bundled;
+        try(InputStream input=context.getAssets().open("uk-map-manifest.json")){bundled=MapPackManifest.parse(input);}
         File cached=new File(context.getFilesDir(),"maps/uk/download-manifest.json");
-        if(cached.isFile())try(InputStream input=new FileInputStream(cached)){return MapPackManifest.parse(input);}catch(IOException corrupt){cached.delete();}
-        try(InputStream input=context.getAssets().open("uk-map-manifest.json")){return MapPackManifest.parse(input);}
+        if(cached.isFile())try(InputStream input=new FileInputStream(cached)){return MapPackManifest.preferNewest(bundled,MapPackManifest.parse(input));}
+        catch(IOException corrupt){cached.delete();}
+        return bundled;
     }
     /** HTTPS catalog refresh is explicit; previously usable catalog remains on connection/validation failure. */
     public static MapPackManifest refreshManifest(Context context)throws IOException {
@@ -32,7 +35,7 @@ public final class MapDownloads {
         File directory=new File(context.getFilesDir(),"maps/uk");if(!directory.isDirectory()&&!directory.mkdirs())throw new IOException("Could not save map catalog");
         File temporary=File.createTempFile("download-manifest-",".tmp",directory);
         try{try(FileOutputStream output=new FileOutputStream(temporary)){output.write(bytes);output.getFD().sync();}Files.move(temporary.toPath(),new File(directory,"download-manifest.json").toPath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);}finally{temporary.delete();}
-        return manifest;
+        return loadManifest(context);
     }
     public static File downloadDirectory(Context context){return new File(context.getFilesDir(),"maps/uk/.downloads");}
 }

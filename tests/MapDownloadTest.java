@@ -29,6 +29,13 @@ public final class MapDownloadTest {
         byte[] scotland=fixture(MapPackCatalog.region("scotland").bounds);MapPackSource source=source("scotland","v1",scotland);
         MapPackManifest parsed=parse(manifest(source.sha256));check(parsed.forRegion("scotland").bytes==136,"manifest real size and region metadata");
         check(parsed.forRegion("uk-scotland").sha256.equals(source.sha256),"manifest hash and public pack ID");
+        MapPackManifest oldCached=parse(manifest(source.sha256).replace("2026-10-11","2026-10-10").replace("\"v1\"","\"old-cache\""));
+        check(MapPackManifest.preferNewest(parsed,oldCached).forRegion("scotland").version.equals("v1"),"newer bundled catalog is not hidden by old app cache");
+        MapPackManifest newCached=parse(manifest(source.sha256).replace("2026-10-11","2026-10-12").replace("\"v1\"","\"new-cache\""));
+        check(MapPackManifest.preferNewest(parsed,newCached).forRegion("scotland").version.equals("new-cache"),"newer cached catalog survives app upgrade");
+        MapPackManifest corrected=parse(manifest(source.sha256).replace("{\"schema_version\"","{\"generated_at\":\"2026-10-12T10:00:00Z\",\"schema_version\"").replace("\"v1\"","\"correction\""));
+        check(MapPackManifest.preferNewest(corrected,parsed).forRegion("scotland").version.equals("correction"),"same-data-date corrected bundled catalog wins by generation time");
+        check(MapPackManifest.preferNewest(parsed,corrected).forRegion("scotland").version.equals("correction"),"same-data-date corrected cached catalog wins by generation time");
         rejects(()->parse(manifest(source.sha256).replace("schema_version\":1","schema_version\":2")),"unsupported manifest version");
         rejects(()->parse(manifest(source.sha256).replace("country_id\":\"uk","country_id\":\"in")),"UK-only manifest country");
         rejects(()->parse(manifest(source.sha256).replace("https://","http://")),"insecure download URL rejected");
@@ -47,6 +54,8 @@ public final class MapDownloadTest {
         check(!installed.searchAvailable&&!installed.routingAvailable&&installed.poisAvailable,"rendered POIs do not imply search or driving graph");
         check(!source.updateAvailable(installed),"current manifest matches installed map");
         MapPackSource v2=source("scotland","v2",scotland);check(v2.updateAvailable(installed),"new version update available");
+        MapPackSource older=new MapPackSource(source.id,source.regionId,source.countryId,source.name,"old","2026-10-10",source.downloadUrl,source.bytes,source.sha256,source.minZoom,source.maxZoom,source.bounds,source.attribution,true,true,false,false);
+        check(!older.updateAvailable(installed),"older map catalog is not advertised as an update");
         File old=installed.file;
         File cancelledInstall=download(v2,scotland,downloadDir);
         rejects(()->store.installDownloaded(cancelledInstall,v2,()->true),"cancel during installation preserves catalog");

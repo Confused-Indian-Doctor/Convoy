@@ -25,7 +25,7 @@ public final class ConvoyOnboarding {
  private static final String[] CAR_NAMES={"Mazda MX-5 NC PRHT","Toyota GT86","Skyline R34","Supra Mk4","Honda NSX","Impreza GC8","Lancer Evo VI","AE86 Trueno","350Z","MX-5 NA","Generic car"};
  public ConvoyOnboarding(Activity activity,Host host){this.activity=activity;this.host=host;}
  private int dp(int n){return Math.round(n*activity.getResources().getDisplayMetrics().density);}
- private LinearLayout box(){LinearLayout v=new LinearLayout(activity);v.setOrientation(1);v.setPadding(dp(20),dp(8),dp(20),dp(12));return v;}
+ private LinearLayout box(){LinearLayout v=new LinearLayout(activity);v.setOrientation(LinearLayout.VERTICAL);v.setPadding(dp(20),dp(8),dp(20),dp(12));return v;}
  private TextView text(String s,int size){TextView t=new TextView(activity);t.setText(s);t.setTextSize(size);t.setTextColor(TEXT);t.setPadding(0,dp(6),0,dp(6));return t;}
  private Button button(LinearLayout parent,String label,Runnable action){Button b=new Button(activity);b.setText(label);b.setAllCaps(false);b.setTextColor(TEXT);b.setTextSize(15);GradientDrawable d=new GradientDrawable();d.setColor(CARD);d.setCornerRadius(dp(12));b.setBackground(d);b.setMinHeight(dp(48));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(52));p.topMargin=dp(8);parent.addView(b,p);b.setOnClickListener(v->action.run());return b;}
  private String name(){return activity.getPreferences(0).getString("name","");}

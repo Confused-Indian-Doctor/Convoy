@@ -34,7 +34,10 @@ public final class MapPackSource {
         this.minZoom=minZoom; this.maxZoom=maxZoom; this.bounds=bounds; this.attribution=attribution;
         this.basemapAvailable=basemap; this.poisAvailable=pois; this.searchAvailable=search; this.routingAvailable=routing;
     }
-    public boolean updateAvailable(MapPack installed) { return installed != null && installed.installed &&
-            (!version.equals(installed.version) || !sha256.equals(installed.sha256)); }
+    public boolean updateAvailable(MapPack installed) {
+        if (installed == null || !installed.installed) return false;
+        if (installed.official && !installed.dataDate.isEmpty() && dataDate.compareTo(installed.dataDate) < 0) return false;
+        return !version.equals(installed.version) || !sha256.equals(installed.sha256);
+    }
     public String fingerprint() { return id + ":" + version + ":" + bytes + ":" + sha256; }
 }
