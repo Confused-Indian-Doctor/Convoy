@@ -15,6 +15,10 @@ public final class ConvoyQr {
   EnumMap<EncodeHintType,Object> hints=new EnumMap<>(EncodeHintType.class);
   hints.put(EncodeHintType.MARGIN,4);
   hints.put(EncodeHintType.ERROR_CORRECTION,ErrorCorrectionLevel.M);
-  return new MultiFormatWriter().encode(invitation,BarcodeFormat.QR_CODE,size,size,hints);
+  BitMatrix modules=new MultiFormatWriter().encode(invitation,BarcodeFormat.QR_CODE,0,0,hints);
+  int scale=Math.max(1,size/modules.getWidth());int width=modules.getWidth()*scale;
+  BitMatrix image=new BitMatrix(width,width);
+  for(int y=0;y<modules.getHeight();y++)for(int x=0;x<modules.getWidth();x++)if(modules.get(x,y))image.setRegion(x*scale,y*scale,scale,scale);
+  return image;
  }
 }

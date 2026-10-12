@@ -299,10 +299,10 @@ jobs:
           from pathlib import Path
           import os, shutil
           root = Path(os.environ.get("GRADLE_USER_HOME", str(Path.home() / ".gradle")))
-          jars = list((root / "caches/modules-2/files-2.1/com.google.zxing/core/3.5.3").glob("*/core-3.5.3.jar"))
+          jars = list((root / "caches/modules-2/files-2.1/com.google.zxing/core/3.5.4").glob("*/core-3.5.4.jar"))
           if jars:
               Path("build/qr-dependency").mkdir(parents=True, exist_ok=True)
-              shutil.copyfile(jars[0], "build/qr-dependency/core-3.5.3.jar")
+              shutil.copyfile(jars[0], "build/qr-dependency/core-3.5.4.jar")
           PYJAR
 
       - name: Upload emulator evidence and diagnostics

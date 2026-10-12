@@ -8,12 +8,12 @@ if [[ -z "$qr_core_jar" ]]; then
   qr_core_jar="$(python3 - "$qr_cache_root" <<'PYJAR'
 from pathlib import Path
 import sys
-root = Path(sys.argv[1]) / 'caches/modules-2/files-2.1/com.google.zxing/core/3.5.3'
-print(next((str(p) for p in root.glob('*/core-3.5.3.jar') if p.is_file()), ''))
+root = Path(sys.argv[1]) / 'caches/modules-2/files-2.1/com.google.zxing/core/3.5.4'
+print(next((str(p) for p in root.glob('*/core-3.5.4.jar') if p.is_file()), ''))
 PYJAR
 )"
 fi
-[[ -f "$qr_core_jar" ]] || { echo 'Assemble the Android app first, or pass the resolved ZXing core 3.5.3 jar.' >&2; exit 1; }
+[[ -f "$qr_core_jar" ]] || { echo 'Assemble the Android app first, or pass the resolved ZXing core 3.5.4 jar.' >&2; exit 1; }
 mkdir -p build/qr-test-classes
 compiler=(javac)
 if ! command -v javac >/dev/null; then compiler=(java -m jdk.compiler/com.sun.tools.javac.Main); fi
