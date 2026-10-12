@@ -24,9 +24,9 @@ public class ConvoyService extends Service {
  public boolean accepting(){return session!=null&&session.isAccepting();}
  public void setAccepting(boolean value){if(session!=null){try{session.setAccepting(value);}catch(IOException invalid){return;}cachedInvite=null;cachedInviteState="";advertiseSession();}}
  public String sessionTitle(){return session!=null?session.convoyName:joiningInvite!=null?joiningInvite.convoyName:"Convoy";}
- public synchronized String inviteLink()throws IOException{if(!secureSession()||!accepting()||!networkReady||server==null)return "";String state=invitationNetwork.mode+"|"+invitationNetwork.ssid+"|"+members.size()+"|"+server.getLocalPort();if(cachedInvite==null||!state.equals(cachedInviteState)){cachedInvite=session.createInvite(invitationNetwork,server.getLocalPort(),1+members.size(),System.currentTimeMillis());cachedInviteState=state;}return cachedInvite.toUri();}
+ public synchronized String inviteLink()throws IOException{if(!secureSession()||!accepting()||!networkReady||server==null)return "";String state=invitationNetwork.mode+"|"+invitationNetwork.ssid+"|"+driverCount()+"|"+server.getLocalPort();if(cachedInvite==null||!state.equals(cachedInviteState)){cachedInvite=session.createInvite(invitationNetwork,server.getLocalPort(),driverCount(),System.currentTimeMillis());cachedInviteState=state;}return cachedInvite.toUri();}
  public String connectionDiagnostics(){return status+"\nTransport: "+(bluetooth?"Bluetooth":"Local Wi-Fi/LAN")+"\n"+addresses()+"\nPort: "+(server!=null?server.getLocalPort():endpoint!=null?endpoint.port:Wire.PORT)+"\nSession: "+(session!=null?session.sessionId:joiningInvite!=null?joiningInvite.sessionId:"Legacy")+"\nDiscovery: "+(discovery==null?"Not active":discovery.status())+"\nProtocol: "+ConvoyInvite.VERSION+"\n"+detail;}
- private void advertiseSession(){if(!active||!host||session==null||server==null||discovery==null)return;try{discovery.advertise(new LanAdvertisement(session.sessionId,ConvoyInvite.VERSION,session.convoyName,1+members.size(),session.isAccepting(),server.getLocalPort()));}catch(IOException e){detail="Local discovery is unavailable. Try reconnecting to the same Wi-Fi.";}}
+ private void advertiseSession(){if(!active||!host||session==null||server==null||discovery==null)return;try{discovery.advertise(new LanAdvertisement(session.sessionId,ConvoyInvite.VERSION,session.convoyName,driverCount(),session.isAccepting(),server.getLocalPort()));}catch(IOException e){detail="Local discovery is unavailable. Try reconnecting to the same Wi-Fi.";}}
  private void startDiscovery(Network network){if(discovery==null)return;try{discovery.discover(joiningInvite.sessionId,ConvoyInvite.VERSION,network);}catch(IOException unavailable){detail="Could not discover your host. Check that everyone is on the same local Wi-Fi.";}}
 private final CopyOnWriteArrayList<Link> links=new CopyOnWriteArrayList<>();
  private final Set<Closeable> pending=ConcurrentHashMap.newKeySet();
@@ -38,6 +38,7 @@ private final CopyOnWriteArrayList<Link> links=new CopyOnWriteArrayList<>();
  private volatile long lastSound=0;private volatile String speakerId="";private volatile long speakerUntil=0;
  private AudioManager audioManager;private AudioFocusRequest focusRequest;private volatile boolean audioFocused=true;
  public int connectionCount(){return links.size();}
+ public int driverCount(){if(host)return 1+links.size();long now=SystemClock.elapsedRealtime();return 1+(int)members.values().stream().filter(m->now-m.received<=10000).count();}
  @Override public IBinder onBind(Intent i){return null;}
  @Override public int onStartCommand(Intent intent,int flags,int startId){
   if(intent!=null&&"STOP".equals(intent.getAction())){stopSelf();return START_NOT_STICKY;}

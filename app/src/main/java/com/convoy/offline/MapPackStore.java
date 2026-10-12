@@ -54,6 +54,7 @@ public final class MapPackStore {
         double score=pack.maxZoom>=zoom?1000:pack.maxZoom*10;
         if(region!=null&&region.id.equals(pack.regionId))score+=100;
         if(pack.official)score+=50;
+        if("overview".equals(pack.regionId)&&zoom<=7)score+=500;
         if(pack.bundled)score-=20;
         double area=(pack.bounds.north-pack.bounds.south)*(pack.bounds.east-pack.bounds.west);
         return score-Math.min(20,area/100);

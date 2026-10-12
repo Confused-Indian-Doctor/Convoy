@@ -93,7 +93,13 @@ public final class MapDownloadTest {
         byte[] wales=fixture(MapPackCatalog.region("wales").bounds);MapPackSource w=source("wales","v1",wales);store.installDownloaded(download(w,wales,downloadDir),w);
         check(store.coveringPacks(51.48,-3.18).stream().anyMatch(p->p.id.equals("wales")),"multiple installed regions independently cover their area");
         check(store.chooseAt(51.48,-3.18,12).id.equals("wales"),"automatic regional map switching");
-        store.remove("scotland");check(!newer.file.exists()&&store.chooseAt(57.4,-4.2,12)==null,"downloaded map deletion clears coverage");
+        MapPackCatalog.Bounds overviewBounds=new MapPackCatalog.Bounds(49.8,-8.8,61.0,1.9);
+        byte[] overview=fixture(overviewBounds);overview[101]=7;
+        MapPackSource overviewSource=new MapPackSource("uk-overview","overview","uk","United Kingdom overview","v1","2026-10-11","https://example.test/uk.pmtiles",overview.length,hash(overview),0,7,overviewBounds,"OpenStreetMap / Protomaps",true,false,false,false);
+        store.installDownloaded(download(overviewSource,overview,downloadDir),overviewSource);
+        check(store.chooseAt(57.4,-4.2,5).id.equals("overview"),"wide viewport automatically uses shared UK overview");
+        check(store.chooseAt(57.4,-4.2,12).id.equals("scotland"),"driving zoom switches back to detailed regional map");
+        store.remove("scotland");check(!newer.file.exists()&&store.chooseAt(57.4,-4.2,12).maxZoom<=7,"downloaded map deletion clears coverage");
         check(store.storageStats().maps>0&&store.storageStats().free>0,"actual storage and free space reported");
         if(args.length>0){try(InputStream input=new FileInputStream(args[0])){MapPackManifest live=MapPackManifest.parse(input);check(live.packs.size()==6,"published five-region plus overview manifest parses");check(live.forRegion("scotland").bytes==178784492L,"published Scotland size is actual generated size");}}
         System.out.println("TOTAL "+checks+" map-download checks passed");
