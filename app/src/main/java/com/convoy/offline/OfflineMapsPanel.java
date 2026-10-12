@@ -180,7 +180,7 @@ public final class OfflineMapsPanel {
         advancedButton.setOnClickListener(view -> {
             advancedExpanded = !advancedExpanded;
             advanced.setVisibility(advancedExpanded ? View.VISIBLE : View.GONE);
-            advancedButton.setText(advancedExpanded ? "Advanced · hide" : "Advanced · custom maps");
+            setLabel(advancedButton,advancedExpanded ? "Advanced · hide" : "Advanced · custom maps");
         });
         refresh(state);
     }
@@ -194,17 +194,17 @@ public final class OfflineMapsPanel {
         }
         if (activity.isDestroyed() || snapshot == null) return;
         state = snapshot;
-        mapStorage.setText(size(snapshot.mapBytes)); dataStorage.setText(size(snapshot.routingSearchBytes));
-        routeStorage.setText(size(snapshot.routeBytes)); freeStorage.setText(size(snapshot.freeBytes));
+        setLabel(mapStorage,size(snapshot.mapBytes)); setLabel(dataStorage,size(snapshot.routingSearchBytes));
+        setLabel(routeStorage,size(snapshot.routeBytes)); setLabel(freeStorage,size(snapshot.freeBytes));
         temporaryStorage.setVisibility(snapshot.temporaryBytes > 0 ? View.VISIBLE : View.GONE);
-        temporaryStorage.setText("Downloads in progress · " + size(snapshot.temporaryBytes));
-        catalogStatus.setText(snapshot.loading ? "Loading map catalog…" : snapshot.catalogMessage);
+        setLabel(temporaryStorage,"Downloads in progress · " + size(snapshot.temporaryBytes));
+        setLabel(catalogStatus,snapshot.loading ? "Loading map catalog…" : snapshot.catalogMessage);
         catalogStatus.setVisibility(snapshot.loading || !snapshot.catalogMessage.isEmpty() ? View.VISIBLE : View.GONE);
         refreshButton.setEnabled(!snapshot.catalogBusy);
-        refreshButton.setText(snapshot.catalogBusy ? "Refreshing map catalog…" : "Refresh map catalog");
+        setLabel(refreshButton,snapshot.catalogBusy ? "Refreshing map catalog…" : "Refresh map catalog");
         importButton.setEnabled(!snapshot.importing);
         importStatus.setVisibility(snapshot.importing ? View.VISIBLE : View.GONE);
-        importStatus.setText(snapshot.importing ? "Importing · " + size(snapshot.importedBytes) + " copied" : "");
+        setLabel(importStatus,snapshot.importing ? "Importing · " + size(snapshot.importedBytes) + " copied" : "");
         developerButton.setVisibility(snapshot.debugBuild ? View.VISIBLE : View.GONE);
         updateCurrentArea(snapshot);
 
@@ -237,12 +237,12 @@ public final class OfflineMapsPanel {
                 if (currentRow == null || row.installed()) currentRow = row;
             }
         currentArea.setVisibility(snapshot.currentAreaName.isEmpty() ? View.GONE : View.VISIBLE);
-        currentName.setText(snapshot.currentAreaName);
-        currentStatus.setText(!snapshot.currentAreaStatus.isEmpty() ? snapshot.currentAreaStatus : currentRow != null && currentRow.installed() ? "Offline map installed ✓" : "Offline map not installed");
+        setLabel(currentName,snapshot.currentAreaName);
+        setLabel(currentStatus,!snapshot.currentAreaStatus.isEmpty() ? snapshot.currentAreaStatus : currentRow != null && currentRow.installed() ? "Offline map installed ✓" : "Offline map not installed");
         currentStatus.setTextColor(currentRow != null && currentRow.installed() ? BLUE : MUTED);
         boolean available = currentRow != null && (currentRow.installed() || currentRow.hasDownloadSource());
         currentAction.setVisibility(available ? View.VISIBLE : View.GONE);
-        currentAction.setText(currentRow != null && currentRow.installed() ? "Open map" : "Download");
+        setLabel(currentAction,currentRow != null && currentRow.installed() ? "Open map" : "Download");
         currentAction.setEnabled(currentRow != null && !currentRow.busy());
         currentArea.setContentDescription("Current area " + snapshot.currentAreaName + ". " + currentStatus.getText());
     }
@@ -273,17 +273,17 @@ public final class OfflineMapsPanel {
             });
         }
         void bind(Row next) {
-            row = next; title.setText(row.name);
+            row = next; setLabel(title,row.name);
             String bytes = row.installed() ? size(row.installedBytes >= 0 ? row.installedBytes : row.installedPack.bytes) :
                     row.downloadBytes > 0 ? size(row.downloadBytes) : "Size available when published";
             String status = row.status.isEmpty() ? row.installed() ? row.updateAvailable ? "Update available" : "Installed ✓" :
                     row.hasDownloadSource() ? "Ready to download" : "Not published yet" : row.status;
-            subtitle.setText(bytes + " · " + status);
+            setLabel(subtitle,bytes + " · " + status);
             subtitle.setTextColor(row.installed() && !row.updateAvailable ? BLUE : MUTED);
             boolean retry = row.downloadState == DownloadState.FAILED || row.downloadState == DownloadState.CANCELLED;
             action.setVisibility(row.busy() || row.installed() || row.hasDownloadSource() ? View.VISIBLE : View.GONE);
             action.setEnabled(!retry || row.hasDownloadSource());
-            action.setText(row.busy() ? "Cancel" : retry ? "Retry" : row.installed() ? row.updateAvailable && row.hasDownloadSource() ? "Update" : "Open" : "Download");
+            setLabel(action,row.busy() ? "Cancel" : retry ? "Retry" : row.installed() ? row.updateAvailable && row.hasDownloadSource() ? "Update" : "Open" : "Download");
             action.setContentDescription(action.getText() + " " + row.name);
             progress.setVisibility(row.busy() ? View.VISIBLE : View.GONE);
             progressText.setVisibility(row.busy() || retry ? View.VISIBLE : View.GONE);
@@ -301,7 +301,7 @@ public final class OfflineMapsPanel {
                 case CANCELLED: message = "Download cancelled" + (row.installed() ? " · existing map kept" : ""); break;
                 default: message = "";
             }
-            progressText.setText(message); progressText.setTextColor(retry ? AMBER : MUTED);
+            setLabel(progressText,message); progressText.setTextColor(retry ? AMBER : MUTED);
             root.setContentDescription(row.name + ". " + subtitle.getText() + (message.isEmpty() ? "" : ". " + message) + ". Tap for map details.");
         }
     }
@@ -364,11 +364,11 @@ public final class OfflineMapsPanel {
         view.setPadding(0, 0, 0, dp(6)); return view;
     }
     private TextView label(String value, int size, int color) {
-        TextView view = new TextView(activity); view.setText(value); view.setTextSize(size); view.setTextColor(color);
+        TextView view = new TextView(activity); setLabel(view,value); view.setTextSize(size); view.setTextColor(color);
         view.setPadding(0, dp(2), 0, dp(2)); return view;
     }
     private Button action(String title, boolean primary) {
-        Button button = new Button(activity); button.setText(title); button.setTextSize(13); button.setAllCaps(false);
+        Button button = new Button(activity); setLabel(button,title); button.setTextSize(13); button.setAllCaps(false);
         button.setTypeface(null, Typeface.BOLD); button.setTextColor(primary ? Color.WHITE : TEXT);
         button.setMinHeight(dp(48)); button.setMinimumHeight(dp(48)); button.setMinWidth(0); button.setMinimumWidth(0);
         button.setPadding(dp(10), dp(4), dp(10), dp(4)); button.setSingleLine(true);
@@ -385,5 +385,8 @@ public final class OfflineMapsPanel {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.topMargin = dp(top); params.bottomMargin = dp(bottom); parent.addView(view, params);
     }
     private int dp(float value) { return (int) (activity.getResources().getDisplayMetrics().density * value + 0.5f); }
+    private static void setLabel(TextView view, CharSequence value) {
+        if (!TextUtils.equals(view.getText(), value)) view.setText(value);
+    }
     private static String size(long bytes) { return bytes < 0 ? "Calculating…" : MapPack.formatBytes(bytes); }
 }

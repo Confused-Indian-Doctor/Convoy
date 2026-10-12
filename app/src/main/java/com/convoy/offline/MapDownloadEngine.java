@@ -52,7 +52,7 @@ public final class MapDownloadEngine {
                     while((count=response.body.read(buffer))!=-1){checkCancelled(cancellation);if(System.nanoTime()-began>TimeUnit.MINUTES.toNanos(50))throw new IOException("Map download checkpoint; remaining bytes will retry");if(count==0)continue;
                         if(count>source.bytes-copied)throw new PermanentFailure("Map download exceeds its declared size");
                         output.write(buffer,0,count);copied+=count;
-                        long now=System.nanoTime();if(progress!=null&&(now-lastReported>250000000L||copied==source.bytes)){progress.update(copied,source.bytes,"Downloading");lastReported=now;}
+                        long now=System.nanoTime();if(progress!=null&&(now-lastReported>2000000000L||copied==source.bytes)){progress.update(copied,source.bytes,"Downloading");lastReported=now;}
                     }
                     output.getFD().sync();
                     if(copied!=source.bytes)throw new IOException("Map download interrupted; retrying remaining bytes");
