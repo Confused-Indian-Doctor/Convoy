@@ -21,7 +21,8 @@ public class ConvoyService extends Service {
  private LanDiscovery discovery;private HotspotBootstrap bootstrap;private volatile LanDiscovery.Endpoint endpoint;
  private volatile ConvoyInvite.Network invitationNetwork=ConvoyInvite.Network.lan();private volatile boolean networkReady=false,consumer=false;
  public boolean secureSession(){return consumer&&session!=null&&session.isActive();}
- public boolean accepting(){return session!=null&&session.isAccepting();}
+ public boolean invitationsExpired(){return session!=null&&System.currentTimeMillis()>=session.expiresAtMillis;}
+ public boolean accepting(){return session!=null&&session.isAccepting()&&!invitationsExpired();}
  public void setAccepting(boolean value){if(session!=null){try{session.setAccepting(value);}catch(IOException invalid){return;}cachedInvite=null;cachedInviteState="";advertiseSession();}}
  public String sessionTitle(){return session!=null?session.convoyName:joiningInvite!=null?joiningInvite.convoyName:"Convoy";}
  public synchronized String inviteLink()throws IOException{if(!secureSession()||!accepting()||!networkReady||server==null)return "";String state=invitationNetwork.mode+"|"+invitationNetwork.ssid+"|"+driverCount()+"|"+server.getLocalPort();if(cachedInvite==null||!state.equals(cachedInviteState)){cachedInvite=session.createInvite(invitationNetwork,server.getLocalPort(),driverCount(),System.currentTimeMillis());cachedInviteState=state;}return cachedInvite.toUri();}
