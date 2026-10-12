@@ -16,6 +16,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 80
+    permissions:
+      contents: write
     defaults:
       run:
         shell: bash
@@ -258,6 +260,36 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish the install-tested debug APK as an explicit prerelease
+        if: env.CONVOY_RELEASE_SIGNED != 'true' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TEST_TAG="convoy-${CONVOY_VERSION}-test-${GITHUB_SHA:0:7}"
+          mkdir -p build/public-test
+          cp app/build/outputs/apk/debug/app-debug.apk "build/public-test/Convoy-${CONVOY_VERSION}-debug-test.apk"
+          python3 - <<'PYNOTES'
+          import os
+          from pathlib import Path
+          version = os.environ["CONVOY_VERSION"]
+          sha = os.environ["GITHUB_SHA"]
+          Path("build/public-test/README-test.md").write_text(
+              f"Convoy {version} install-tested debug/test APK\n\n"
+              "This is a test build, not a privately signed production update. "
+              "It cannot update installations signed with the existing private release identity or another debug key. "
+              "Use a fresh test device; do not erase existing route/map data just to install this build.\n\n"
+              f"Source commit: {sha}\n"
+              "Release/debug compilation, lint, host checks, APK validation and Android 15/16 offline smoke tests passed before publication. "
+              "Physical multi-phone hotspot/mDNS/radio/audio interoperability has not been tested.\n")
+          PYNOTES
+          if ! gh release view "$TEST_TAG" >/dev/null 2>&1; then
+            gh release create "$TEST_TAG" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "Convoy ${CONVOY_VERSION} test APK" --notes-file build/public-test/README-test.md
+          fi
+          gh release upload "$TEST_TAG" "build/public-test/Convoy-${CONVOY_VERSION}-debug-test.apk" --clobber
 
       - name: Upload emulator evidence and diagnostics
         if: always()
