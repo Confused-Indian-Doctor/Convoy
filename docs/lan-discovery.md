@@ -10,7 +10,7 @@ Public TXT metadata is deliberately limited to `v` (discovery version 1), `sid`
 (canonical session UUID), `title`, `cars`, and `open`. The session UUID is a public
 selector, not an authentication credential. A nearby advertisement cannot authorize
 a driver: the current signed invitation and the encrypted transport admission must
-still be verified by the live host. Discovery never publishes an invitation token,
+still be verified by the live host. Private admission uses a separate, invitation-signed P-256 ECDH key, RFC 5869 HKDF-SHA256 and AES-GCM inside the unchanged group channel. A fresh encrypted host challenge proves client key possession before admission is committed; captured requests cannot be replayed against a later challenge. Group-key holders cannot read private reconnect credentials. The host also signs its acknowledgement bound to the driver and fresh client challenge. Discovery never publishes an invitation token,
 Wi-Fi password, group encryption key or invitation secret.
 
 `LanDiscovery` owns a non-reference-counted Wi-Fi multicast lock only while scanning

@@ -3,7 +3,6 @@ package com.convoy.offline;
 import com.google.zxing.BarcodeFormat;
 import com.google.zxing.BinaryBitmap;
 import com.google.zxing.DecodeHintType;
-import com.google.zxing.MultiFormatWriter;
 import com.google.zxing.RGBLuminanceSource;
 import com.google.zxing.Result;
 import com.google.zxing.common.BitMatrix;
@@ -67,8 +66,7 @@ public final class ConvoyQrTest {
                     "Convoy-hotspot-long-network-name", "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!",
                     true), Wire.PORT, 64, NOW);
             roundTrip(invitation, 600, "network-bootstrap invitation pixels round trip");
-            ConvoyInvite decoded = ConvoyInvite.decode(scan(new MultiFormatWriter().encode(
-                    invitation.toUri(), BarcodeFormat.QR_CODE, 600, 600), 0), NOW);
+            ConvoyInvite decoded = ConvoyInvite.decode(scan(ConvoyQr.encode(invitation.toUri(),600),0), NOW);
             check(decoded.network.mode == ConvoyInvite.Mode.HOTSPOT && decoded.network.wpa3,
                     "actual scanned QR retains consent-based Wi-Fi bootstrap");
         }

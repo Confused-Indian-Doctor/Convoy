@@ -84,13 +84,13 @@ public final class ConvoyInvite {
     public final int port, driverCount;
     public final long createdAtMillis, expiresAtMillis;
     public final Network network;
-    private final byte[] groupKey, invitationSecret, signingPublicKey;
+    private final byte[] groupKey, invitationSecret, signingPublicKey, agreementPublicKey;
     private final String encodedToken;
 
     private ConvoyInvite(String sessionId, String hostId, String hostName, String convoyName,
                         int port, int driverCount, long createdAtMillis, long expiresAtMillis,
                         Network network, byte[] groupKey, byte[] invitationSecret,
-                        byte[] signingPublicKey, String encodedToken) throws IOException {
+                        byte[] signingPublicKey, byte[] agreementPublicKey, String encodedToken) throws IOException {
         this.sessionId = canonicalId(sessionId);
         this.hostId = canonicalId(hostId);
         safeText(hostName, 32, 128, false);
@@ -101,7 +101,7 @@ public final class ConvoyInvite {
                 || expiresAtMillis - createdAtMillis > MAX_LIFETIME_MILLIS) throw invalid();
         if (groupKey == null || groupKey.length != 32 || invitationSecret == null
                 || invitationSecret.length != 32 || signingPublicKey == null
-                || signingPublicKey.length < 80 || signingPublicKey.length > 128) throw invalid();
+                || signingPublicKey.length < 80 || signingPublicKey.length > 128 || agreementPublicKey == null || agreementPublicKey.length < 80 || agreementPublicKey.length > 128) throw invalid();
         this.hostName = hostName;
         this.convoyName = convoyName;
         this.port = port;
@@ -112,16 +112,17 @@ public final class ConvoyInvite {
         this.groupKey = groupKey.clone();
         this.invitationSecret = invitationSecret.clone();
         this.signingPublicKey = signingPublicKey.clone();
+        this.agreementPublicKey = agreementPublicKey.clone();
         this.encodedToken = encodedToken;
     }
 
     static ConvoyInvite issue(String sessionId, String hostId, String hostName, String convoyName,
                              int port, int driverCount, long created, long expires,
                              Network network, byte[] groupKey, byte[] invitationSecret,
-                             PublicKey publicKey, PrivateKey privateKey) throws IOException {
+                             PublicKey publicKey, PrivateKey privateKey, PublicKey agreementKey) throws IOException {
         ConvoyInvite unsigned = new ConvoyInvite(sessionId, hostId, hostName, convoyName, port,
                 driverCount, created, expires, network, groupKey, invitationSecret,
-                publicKey.getEncoded(), null);
+                publicKey.getEncoded(), agreementKey.getEncoded(), null);
         try {
             byte[] body = unsigned.body();
             byte[] signed = signedContent(body);
@@ -137,7 +138,7 @@ public final class ConvoyInvite {
             String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes.toByteArray());
             if (token.length() > MAX_TOKEN_CHARS) throw invalid();
             return new ConvoyInvite(sessionId, hostId, hostName, convoyName, port, driverCount,
-                    created, expires, network, groupKey, invitationSecret, publicKey.getEncoded(), token);
+                    created, expires, network, groupKey, invitationSecret, publicKey.getEncoded(), agreementKey.getEncoded(), token);
         } catch (GeneralSecurityException error) {
             throw new IOException("Could not create convoy invitation.", error);
         }
@@ -210,11 +211,13 @@ public final class ConvoyInvite {
         byte[] group = new byte[32], invitation = new byte[32];
         input.readFully(group); input.readFully(invitation);
         int publicSize = input.readUnsignedShort();
-        if (publicSize < 80 || publicSize > 128 || input.available() != publicSize) throw invalid();
+        if (publicSize < 80 || publicSize > 128 || input.available() < publicSize + 2) throw invalid();
         byte[] publicKey = new byte[publicSize]; input.readFully(publicKey);
+        int agreementSize=input.readUnsignedShort();if(agreementSize<80||agreementSize>128||input.available()!=agreementSize)throw invalid();byte[] agreementKey=new byte[agreementSize];input.readFully(agreementKey);
+        AdmissionPrivacy.publicKey(agreementKey);
         Network network = new Network(Mode.values()[mode], ssid, password, wpa3, bluetooth);
         return new ConvoyInvite(session, host, hostName, name, port, count, created, expires,
-                network, group, invitation, publicKey, token);
+                network, group, invitation, publicKey, agreementKey, token);
     }
 
     private byte[] body() throws IOException {
@@ -228,6 +231,7 @@ public final class ConvoyInvite {
         output.writeUTF(network.bluetoothAddress); output.writeBoolean(network.wpa3);
         output.write(groupKey); output.write(invitationSecret);
         output.writeShort(signingPublicKey.length); output.write(signingPublicKey);
+        output.writeShort(agreementPublicKey.length);output.write(agreementPublicKey);
         byte[] result = bytes.toByteArray();
         if (result.length > MAX_BODY_BYTES) throw invalid();
         return result;
@@ -256,9 +260,10 @@ public final class ConvoyInvite {
                 MessageDigest.getInstance("SHA-256").digest(signingPublicKey)); }
         catch (GeneralSecurityException impossible) { throw new IllegalStateException(impossible); }
     }
-    boolean matchesCredentials(byte[] group, byte[] secret, byte[] publicKey) {
+    byte[] agreementPublicKey(){return agreementPublicKey.clone();}
+    boolean matchesCredentials(byte[] group, byte[] secret, byte[] publicKey, byte[] agreementKey) {
         return MessageDigest.isEqual(groupKey, group) && MessageDigest.isEqual(invitationSecret, secret)
-                && MessageDigest.isEqual(signingPublicKey, publicKey);
+                && MessageDigest.isEqual(signingPublicKey, publicKey) && MessageDigest.isEqual(agreementPublicKey,agreementKey);
     }
     void verifyHostSignature(byte[] message, byte[] signature) throws IOException {
         try {

@@ -9,7 +9,7 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Arrays;
 
-/** Bounded admission frames exchanged inside the existing authenticated Wire.Channel. */
+/** Bounded inner admission frames. ConvoyService always wraps them in AdmissionPrivacy inside Wire.Channel. */
 public final class InviteHandshake {
     private static final int REQUEST = 0x434a4931, ACCEPTED = 0x434a4131;
     public static final int MAX_FRAME_BYTES = ConvoyInvite.MAX_TOKEN_CHARS + 96;

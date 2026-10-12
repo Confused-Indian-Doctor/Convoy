@@ -32,7 +32,7 @@ public final class ConvoySession implements AutoCloseable {
     private final byte[] groupKey = new byte[32], invitationSecret = new byte[32];
     private final Map<String, byte[]> admitted = new HashMap<>();
     private final Set<String> approved = new HashSet<>();
-    private KeyPair signingKeys;
+    private KeyPair signingKeys,agreementKeys;
     private boolean active = true, accepting = true, approvalRequired;
 
     private ConvoySession(String hostId, String hostName, String convoyName, long nowMillis,
@@ -52,7 +52,7 @@ public final class ConvoySession implements AutoCloseable {
         try {
             KeyPairGenerator generator = KeyPairGenerator.getInstance("EC");
             generator.initialize(new ECGenParameterSpec("secp256r1"), random);
-            signingKeys = generator.generateKeyPair();
+            signingKeys = generator.generateKeyPair();agreementKeys=generator.generateKeyPair();
         } catch (GeneralSecurityException error) {
             Arrays.fill(groupKey, (byte) 0); Arrays.fill(invitationSecret, (byte) 0);
             throw new IOException("Could not create secure convoy session.", error);
@@ -72,7 +72,7 @@ public final class ConvoySession implements AutoCloseable {
         if (nowMillis >= expiresAtMillis) throw new IOException("The convoy invitation has expired.");
         ConvoyInvite invite = ConvoyInvite.issue(sessionId, hostId, hostName, convoyName, port,
                 driverCount, createdAtMillis, expiresAtMillis, network, groupKey, invitationSecret,
-                signingKeys.getPublic(), signingKeys.getPrivate());
+                signingKeys.getPublic(), signingKeys.getPrivate(),agreementKeys.getPublic());
         invite.requireCurrent(nowMillis);
         return invite;
     }
@@ -101,7 +101,7 @@ public final class ConvoySession implements AutoCloseable {
         if (hostId.equals(identity)) throw new IOException("Invalid joining driver identity.");
         if (invite == null || !sessionId.equals(invite.sessionId) || !hostId.equals(invite.hostId)
                 || invite.createdAtMillis != createdAtMillis || invite.expiresAtMillis != expiresAtMillis
-                || !invite.matchesCredentials(groupKey, invitationSecret, signingKeys.getPublic().getEncoded()))
+                || !invite.matchesCredentials(groupKey, invitationSecret, signingKeys.getPublic().getEncoded(),agreementKeys.getPublic().getEncoded()))
             throw new IOException("This invitation belongs to a different convoy.");
         // Admitted drivers can recover a dropped link after admission closes or the invite expires.
         byte[] previous = admitted.get(identity);
@@ -121,8 +121,10 @@ public final class ConvoySession implements AutoCloseable {
         return new AdmissionResult(Admission.ACCEPTED, reconnect);
     }
     private void requireActive() throws IOException {
-        if (!active || signingKeys == null) throw new IOException("This convoy has ended.");
+        if (!active || signingKeys == null || agreementKeys == null) throw new IOException("This convoy has ended.");
     }
+    synchronized byte[] agreementPublicKey()throws IOException{requireActive();return agreementKeys.getPublic().getEncoded();}
+    synchronized byte[] agreementSecret(java.security.PublicKey client)throws IOException{requireActive();try{javax.crypto.KeyAgreement agreement=javax.crypto.KeyAgreement.getInstance("ECDH");agreement.init(agreementKeys.getPrivate());agreement.doPhase(client,true);return agreement.generateSecret();}catch(GeneralSecurityException failure){throw new IOException("Could not establish private convoy admission.");}}
     synchronized byte[] signAdmission(byte[] message) throws IOException {
         requireActive();
         try {
@@ -136,7 +138,7 @@ public final class ConvoySession implements AutoCloseable {
     @Override public synchronized void close() {
         active = false; accepting = false;
         Arrays.fill(groupKey, (byte) 0); Arrays.fill(invitationSecret, (byte) 0);
-        signingKeys = null;
+        signingKeys = null;agreementKeys=null;
         for (byte[] token : admitted.values()) Arrays.fill(token, (byte) 0);
         admitted.clear(); approved.clear();
     }

@@ -190,6 +190,7 @@ jobs:
             build/release/packaging-checks.txt
             build/qr-dependency/
             build/qr-tests.txt
+            build/admission-privacy-tests.txt
             build/invite-tests.txt
             build/discovery-tests.txt
             build/map-download-tests.txt
@@ -315,6 +316,7 @@ jobs:
             build/smoke-api35/
             build/qr-dependency/
             build/qr-tests.txt
+            build/admission-privacy-tests.txt
             build/invite-tests.txt
             build/discovery-tests.txt
             build/map-download-tests.txt
