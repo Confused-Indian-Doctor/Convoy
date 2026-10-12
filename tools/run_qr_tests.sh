@@ -18,5 +18,5 @@ mkdir -p build/qr-test-classes
 compiler=(javac)
 if ! command -v javac >/dev/null; then compiler=(java -m jdk.compiler/com.sun.tools.javac.Main); fi
 "${compiler[@]}" -encoding UTF-8 -cp "$qr_core_jar" -d build/qr-test-classes \
-  app/src/main/java/com/convoy/offline/{Wire,ConvoyInvite,ConvoySession}.java tests/ConvoyQrTest.java
+  app/src/main/java/com/convoy/offline/{Wire,ConvoyInvite,ConvoySession,ConvoyQr}.java tests/ConvoyQrTest.java
 java -cp "build/qr-test-classes:$qr_core_jar" com.convoy.offline.ConvoyQrTest | tee build/qr-tests.txt

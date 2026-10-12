@@ -188,6 +188,7 @@ jobs:
             build/release/unsigned.sha256
             build/release/apk-badging.txt
             build/release/packaging-checks.txt
+            build/qr-dependency/
             build/qr-tests.txt
             build/invite-tests.txt
             build/discovery-tests.txt
@@ -291,6 +292,19 @@ jobs:
           fi
           gh release upload "$TEST_TAG" "build/public-test/Convoy-${CONVOY_VERSION}-debug-test.apk" --clobber
 
+      - name: Preserve the public QR decoder dependency for reproducible checks
+        if: always()
+        run: |
+          python3 - <<'PYJAR'
+          from pathlib import Path
+          import os, shutil
+          root = Path(os.environ.get("GRADLE_USER_HOME", str(Path.home() / ".gradle")))
+          jars = list((root / "caches/modules-2/files-2.1/com.google.zxing/core/3.5.3").glob("*/core-3.5.3.jar"))
+          if jars:
+              Path("build/qr-dependency").mkdir(parents=True, exist_ok=True)
+              shutil.copyfile(jars[0], "build/qr-dependency/core-3.5.3.jar")
+          PYJAR
+
       - name: Upload emulator evidence and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -299,6 +313,7 @@ jobs:
           path: |
             build/smoke/
             build/smoke-api35/
+            build/qr-dependency/
             build/qr-tests.txt
             build/invite-tests.txt
             build/discovery-tests.txt
