@@ -32,7 +32,8 @@ public final class PmtilesArchive {
         ByteBuffer fields=ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN);
         double west=fields.getInt(102)/1e7,south=fields.getInt(106)/1e7,east=fields.getInt(110)/1e7,north=fields.getInt(114)/1e7;
         if(west< -180||east>180||south< -90||north>90||west>east||south>north)throw new IOException("Invalid installed bounds");
-        return new Info(file.length(),new MapPackCatalog.Bounds(south,west,north,east),header[100]&255,header[101]&255);
+        int minimum=header[100]&255,maximum=header[101]&255;if(minimum>maximum||maximum>31)throw new IOException("Invalid installed zoom levels");
+        return new Info(file.length(),new MapPackCatalog.Bounds(south,west,north,east),minimum,maximum);
     }
 
     public static Info validate(File file) throws IOException {
@@ -76,7 +77,7 @@ public final class PmtilesArchive {
                 try {
                     String json = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
                             .decode(ByteBuffer.wrap(metadata)).toString().trim();
-                    if (!json.startsWith("{") || !json.endsWith("}")) throw new IOException("Invalid PMTiles metadata object");
+                    if (!(StrictJson.parse(json) instanceof java.util.Map)) throw new IOException("Invalid PMTiles metadata object");
                 } catch (CharacterCodingException invalid) { throw new IOException("Invalid PMTiles metadata encoding", invalid); }
             }
         }

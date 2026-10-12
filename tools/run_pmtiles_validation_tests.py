@@ -26,6 +26,7 @@ def main():
             str(harness), str(ROOT / "tests/PmtilesValidationTest.java"),
             str(ROOT / "app/src/main/java/com/convoy/offline/PmtilesArchive.java"),
             str(ROOT / "app/src/main/java/com/convoy/offline/MapPackCatalog.java"),
+            str(ROOT / "app/src/main/java/com/convoy/offline/StrictJson.java"),
         ], check=True)
         subprocess.run(["java", "-cp", str(classes), "PmtilesValidationTest"], check=True)
 

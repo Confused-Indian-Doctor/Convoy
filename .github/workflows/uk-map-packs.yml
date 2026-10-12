@@ -105,17 +105,52 @@ jobs:
         run: |
           set -euo pipefail
           MAP_VERSION="$(python3 -c 'import json;print(json.load(open("build/uk-maps/source.json"))["version"])')"
-          if gh release view "$MAP_VERSION" >/dev/null 2>&1; then
-            echo 'This dated map version exists; immutable published assets will not be replaced.'
-          else
+          if ! gh release view "$MAP_VERSION" >/dev/null 2>&1; then
             gh release create "$MAP_VERSION" --draft --title "Convoy UK maps $MAP_VERSION" --notes-file build/uk-maps/README-maps.md
-            gh release upload "$MAP_VERSION" build/uk-maps/*.pmtiles build/uk-maps/uk-map-manifest.json build/uk-maps/README-maps.md
+          fi
+          gh api "repos/$GH_REPO/releases/tags/$MAP_VERSION" > build/uk-maps/published-release.json
+          IS_DRAFT="$(python3 -c 'import json;print(str(json.load(open("build/uk-maps/published-release.json"))["draft"]).lower())')"
+          if [[ "$IS_DRAFT" == true ]]; then
+            gh release upload "$MAP_VERSION" build/uk-maps/*.pmtiles build/uk-maps/uk-map-manifest.json build/uk-maps/README-maps.md --clobber
             gh release edit "$MAP_VERSION" --draft=false --latest=false
+          else
+            python3 - <<'PYVERIFY'
+          import json
+          from pathlib import Path
+          assets = {item['name']: item for item in json.loads(Path('build/uk-maps/published-release.json').read_text())['assets']}
+          for pack in json.loads(Path('build/uk-maps/uk-map-manifest.json').read_text())['packs']:
+              asset = assets.get(pack['id'] + '.pmtiles', {})
+              if asset.get('size') != pack['download_bytes'] or asset.get('digest') != 'sha256:' + pack['sha256']:
+                  raise SystemExit('Existing immutable release differs from this recipe; increment recipe version instead of replacing working maps.')
+          print('Existing immutable files match every measured size and checksum.')
+          PYVERIFY
           fi
           if ! gh release view uk-maps-v1 >/dev/null 2>&1; then
             gh release create uk-maps-v1 --title 'Convoy UK map catalog v1' --notes 'Current verified regional pack manifest. Map files are in immutable dated releases.' --latest=false
           fi
           gh release upload uk-maps-v1 build/uk-maps/uk-map-manifest.json --clobber
+      - name: Verify public consumer downloads
+        run: |
+          set -euo pipefail
+          python3 - <<'PYURL'
+          import json
+          from pathlib import Path
+          packs = json.loads(Path('build/uk-maps/uk-map-manifest.json').read_text())['packs']
+          overview = next(pack for pack in packs if pack['id'] == 'uk-overview')
+          Path('build/uk-maps/overview-url.txt').write_text(overview['download_url'])
+          Path('build/uk-maps/overview.sha256').write_text(overview['sha256'] + '  build/uk-maps/consumer-overview.pmtiles\n')
+          PYURL
+          curl -fL --retry 4 --retry-delay 3 "$(cat build/uk-maps/overview-url.txt)" -o build/uk-maps/consumer-overview.pmtiles
+          sha256sum --check --strict build/uk-maps/overview.sha256
+          curl -fL --retry 4 --retry-delay 3 "https://github.com/${{ github.repository }}/releases/download/uk-maps-v1/uk-map-manifest.json?verify=${{ github.run_id }}" -o build/uk-maps/consumer-manifest.json
+          python3 - <<'PYREAD'
+          import json
+          from pathlib import Path
+          wanted = json.loads(Path('build/uk-maps/uk-map-manifest.json').read_text())
+          downloaded = json.loads(Path('build/uk-maps/consumer-manifest.json').read_text())
+          assert downloaded == wanted, 'Public catalog does not match verified publication'
+          print('Public HTTPS catalog and actual PMTiles download verified; complete file hash matches.')
+          PYREAD
       - uses: actions/upload-artifact@v4
         with:
           name: uk-map-manifest-and-measurements

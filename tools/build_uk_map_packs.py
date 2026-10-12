@@ -70,6 +70,8 @@ def resolve_source(pmtiles, explicit=None):
 def validate_archive(path, expected_bounds, expected_zoom):
     """Header/metadata checks supplement the CLI's complete directory validation."""
     size = path.stat().st_size
+    if size > 2 * 1024 * 1024 * 1024:
+        raise ValueError("Region exceeds the GitHub Release 2 GiB asset limit")
     with path.open("rb") as stream:
         h = stream.read(127)
         if len(h) != 127 or h[:8] != b"PMTiles\x03" or h[99] != 1:

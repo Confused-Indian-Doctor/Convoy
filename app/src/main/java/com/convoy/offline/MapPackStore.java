@@ -38,6 +38,38 @@ public final class MapPackStore {
         return result;
     }
 
+    /** Returns a covering installed pack without mutating camera, active routes or selected state. */
+    public MapPack chooseAt(double lat, double lon, double zoom) throws IOException {
+        List<MapPack> packs=list(); MapPack current=selected(), best=null;
+        MapPackCatalog.Region region=MapPackCatalog.at(lat,lon);
+        for(MapPack pack:packs) {
+            if(!pack.covers(lat,lon))continue;
+            if(best==null || score(pack,region,zoom)>score(best,region,zoom))best=pack;
+        }
+        if(best!=null && current.covers(lat,lon) && score(current,region,zoom)==score(best,region,zoom))return current;
+        return best;
+    }
+    private static double score(MapPack pack,MapPackCatalog.Region region,double zoom) {
+        double score=pack.maxZoom>=zoom?1000:pack.maxZoom*10;
+        if(region!=null&&region.id.equals(pack.regionId))score+=100;
+        if(pack.official)score+=50;
+        if(pack.bundled)score-=20;
+        double area=(pack.bounds.north-pack.bounds.south)*(pack.bounds.east-pack.bounds.west);
+        return score-Math.min(20,area/100);
+    }
+    public static final class StorageStats {
+        public final long maps, routingSearch, routes, temporary, free;
+        StorageStats(long maps,long routingSearch,long routes,long temporary,long free){this.maps=maps;this.routingSearch=routingSearch;this.routes=routes;this.temporary=temporary;this.free=free;}
+    }
+    /** Call on a worker thread; totals refer to actual app-private files, not catalog estimates. */
+    public StorageStats storageStats() throws IOException {
+        long temporary=treeBytes(new File(directory,".downloads"));
+        long maps=storageBytes()-temporary;
+        long routingSearch=treeBytes(new File(filesDirectory,"routing"))+treeBytes(new File(filesDirectory,"places"));
+        File[] files=filesDirectory.listFiles();if(files!=null)for(File file:files)if(file.isFile()&&(file.getName().endsWith(".graph")||file.getName().endsWith(".db")))routingSearch+=file.length();
+        return new StorageStats(maps,routingSearch,treeBytes(new File(filesDirectory,"routes")),temporary,filesDirectory.getUsableSpace());
+    }
+
     public void select(String id) throws IOException {
         synchronized (CATALOG_LOCK) {
             Properties catalog = readCatalog(); MapPack found = find(snapshots(catalog), id);
@@ -81,6 +113,54 @@ public final class MapPackStore {
         return install(input, displayName, old.regionId, old.id, true, progress);
     }
 
+    /** Validated downloaded generation is moved within the private filesystem; no extra full-file copy. */
+    public MapPack installDownloaded(File complete, MapPackSource source) throws IOException {
+        return installDownloaded(complete,source,null);
+    }
+    public MapPack installDownloaded(File complete, MapPackSource source, MapDownloadEngine.Cancellation cancellation) throws IOException {
+        checkInstallCancellation(cancellation);
+        if(complete==null || source==null || complete.length()!=source.bytes)throw new IOException("Incomplete map download");
+        PmtilesArchive.Info info=PmtilesArchive.validate(complete);
+        validateExpected(info,source);
+        if(!MapDownloadEngine.sha256(complete,cancellation).equals(source.sha256))throw new IOException("Map checksum mismatch");
+        String id=source.regionId;File owned=packDirectory(id);createDirectory(owned);
+        File installed=new File(owned,"file-"+token()+".pmtiles");boolean committed=false;
+        try {
+            checkInstallCancellation(cancellation);
+            atomicMove(complete,installed);
+            synchronized(CATALOG_LOCK) {
+                checkInstallCancellation(cancellation);
+                Properties catalog=readCatalog();List<String> ids=ids(catalog);
+                if(!ids.contains(id)){if(ids.size()>=MAX_PACKS)throw new IOException("Remove a map before downloading another pack");ids.add(id);}
+                catalog.setProperty("ids",String.join(",",ids));catalog.setProperty(key(id,"region"),source.regionId);
+                catalog.setProperty(key(id,"name"),source.name);catalog.setProperty(key(id,"file"),installed.getName());
+                catalog.setProperty(key(id,"version"),source.version);catalog.setProperty(key(id,"date"),source.dataDate);
+                catalog.setProperty(key(id,"sha256"),source.sha256);catalog.setProperty(key(id,"attribution"),source.attribution);
+                catalog.setProperty(key(id,"official"),"true");catalog.setProperty(key(id,"pois"),Boolean.toString(source.poisAvailable));
+                // Regional basemaps never manufacture searchable databases or routable graphs.
+                catalog.setProperty(key(id,"search"),"false");catalog.setProperty(key(id,"routing"),"false");
+                String selected=catalog.getProperty("selected",MapPackCatalog.BUNDLED_ID);
+                checkInstallCancellation(cancellation);
+                writeCatalog(catalog);committed=true;
+                File[] revisions=owned.listFiles();if(revisions!=null)for(File revision:revisions)if(managedFile(revision.getName())&&!revision.equals(installed))revision.delete();
+                return snapshot(catalog,id,id.equals(selected),info);
+            }
+        } finally {if(!committed)installed.delete();}
+    }
+    private static void checkInstallCancellation(MapDownloadEngine.Cancellation cancellation)throws InterruptedIOException {if(Thread.currentThread().isInterrupted()||(cancellation!=null&&cancellation.cancelled()))throw new InterruptedIOException("Map installation cancelled; existing map is unchanged");}
+    public static void validateExpected(PmtilesArchive.Info info, MapPackSource source) throws IOException {
+        if(info.bytes!=source.bytes || info.minZoom!=source.minZoom || info.maxZoom!=source.maxZoom)throw new IOException("Map metadata does not match its manifest");
+        double epsilon=0.00001;
+        if(Math.abs(info.bounds.south-source.bounds.south)>epsilon || Math.abs(info.bounds.west-source.bounds.west)>epsilon ||
+                Math.abs(info.bounds.north-source.bounds.north)>epsilon || Math.abs(info.bounds.east-source.bounds.east)>epsilon)
+            throw new IOException("Map bounds do not match this region");
+        MapPackCatalog.Region region=MapPackCatalog.region(source.regionId);
+        if(region!=null&&!region.bounds.contains((info.bounds.south+info.bounds.north)/2,(info.bounds.west+info.bounds.east)/2))
+            throw new IOException("This map does not cover the expected UK region");
+        MapPackCatalog.Bounds uk=new MapPackCatalog.Bounds(49.5,-9.5,61.5,2.5);
+        if(!uk.contains(info.bounds.south,info.bounds.west)||!uk.contains(info.bounds.north,info.bounds.east))throw new IOException("This official pack is outside the United Kingdom");
+    }
+
     private MapPack install(InputStream input, String displayName, String region, String id,
             boolean requireExisting, Progress progress) throws IOException {
         if (input == null) throw new IOException("Could not read that map file");
@@ -113,6 +193,7 @@ public final class MapPackStore {
                 catalog.setProperty(key(id, "region"), region);
                 catalog.setProperty(key(id, "name"), safeName(displayName));
                 catalog.setProperty(key(id, "file"), installed.getName());
+                clearSourceFields(catalog,id);
                 catalog.setProperty("selected", id);
                 writeCatalog(catalog); committed = true;
                 // The current generation is durable before old generations are reclaimed.
@@ -161,7 +242,7 @@ public final class MapPackStore {
         }
         if (find(valid, selected) == null) selected = MapPackCatalog.BUNDLED_ID;
         result.add(new MapPack(MapPackCatalog.BUNDLED_ID, "Shrewsbury development map", "shrewsbury", "shrewsbury.pmtiles", null,
-                bundledBytes(), true, true, MapPackCatalog.BUNDLED_ID.equals(selected), MapPackCatalog.SHREWSBURY, 0, 15));
+                bundledBytes(), true, true, MapPackCatalog.BUNDLED_ID.equals(selected), MapPackCatalog.SHREWSBURY, 0, 15, "bundled-dev", "", "", "OpenStreetMap / Protomaps / Overture", false, true, true, true));
         for (MapPackCatalog.Region region : MapPackCatalog.regions()) {
             MapPack installed = find(valid, region.id);
             result.add(installed == null ? new MapPack(region.id, region.name, region.id, "", null, 0, false, false, false, region.bounds, 0, 15) :
@@ -183,7 +264,10 @@ public final class MapPackStore {
         MapPackCatalog.Region region = MapPackCatalog.region(regionId);
         String source = safeName(catalog.getProperty(key(id, "name"), "Imported vector map"));
         String title = region == null ? source.replaceFirst("(?i)\\.pmtiles$", "") : region.name;
-        return new MapPack(id, title, regionId, source, file, file.length(), true, false, selected, info.bounds, info.minZoom, info.maxZoom);
+        return new MapPack(id, title, regionId, source, file, file.length(), true, false, selected, info.bounds, info.minZoom, info.maxZoom,
+                catalog.getProperty(key(id,"version"),""),catalog.getProperty(key(id,"date"),""),catalog.getProperty(key(id,"sha256"),""),
+                catalog.getProperty(key(id,"attribution"),"Imported map; see source licence"),"true".equals(catalog.getProperty(key(id,"official"))),
+                "true".equals(catalog.getProperty(key(id,"pois"))),false,false);
     }
 
     private PmtilesArchive.Info headerInfo(File file) throws IOException {
@@ -224,8 +308,9 @@ public final class MapPackStore {
     }
     private void removeFields(Properties catalog, String id) throws IOException {
         List<String> remaining = ids(catalog); remaining.remove(id); catalog.setProperty("ids", String.join(",", remaining));
-        catalog.remove(key(id, "file")); catalog.remove(key(id, "name")); catalog.remove(key(id, "region"));
+        catalog.remove(key(id, "file")); catalog.remove(key(id, "name")); catalog.remove(key(id, "region"));clearSourceFields(catalog,id);
     }
+    private static void clearSourceFields(Properties catalog,String id) { for(String field:new String[]{"version","date","sha256","attribution","official","pois","search","routing"})catalog.remove(key(id,field)); }
     private File packDirectory(String id) throws IOException {
         if (!validId(id) || MapPackCatalog.BUNDLED_ID.equals(id)) throw new IOException("Invalid offline map pack identifier");
         return new File(directory, id);

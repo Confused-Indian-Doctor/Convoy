@@ -29,7 +29,7 @@ public final class MapPackCatalog {
         public final String id, name, countryId;
         /** Approximate catalog extent. Installed coverage always comes from its PMTiles header. */
         public final Bounds bounds;
-        /** No hosted packs are currently published; imports are the supported installation path. */
+        /** Actual downloadable source metadata is provided by MapPackManifest, never guessed here. */
         public final String downloadUrl = null;
         private Region(String id, String name, Bounds bounds) {
             this.id = id; this.name = name; this.countryId = COUNTRY_ID; this.bounds = bounds;
@@ -46,6 +46,31 @@ public final class MapPackCatalog {
 
     private MapPackCatalog() {}
     public static List<Region> regions() { return REGIONS; }
+    /** Approximate nation boundaries distinguish overlapping map extracts; pack bounds govern tile coverage. */
+    public static Region at(double lat, double lon) {
+        if (!Double.isFinite(lat) || !Double.isFinite(lon)) return null;
+        if(region("northern-ireland").bounds.contains(lat,lon))return region("northern-ireland");
+        if(region("scotland").bounds.contains(lat,lon)){
+            // Rough Solway/Tweed border polyline, sufficient to keep English border towns in their pack.
+            double border=interpolate(lon,new double[]{-3.10,-3.00,-2.87,-2.63,-2.34,-2.30,-2.26,-2.10,-2.04,-1.95},
+                    new double[]{54.980,55.000,55.067,55.132,55.284,55.405,55.592,55.677,55.779,55.830});
+            if(lon< -3.10||lat>=border)return region("scotland");
+        }
+        if(region("wales").bounds.contains(lat,lon)){
+            double border=interpolate(lat,new double[]{51.30,51.60,51.80,52.00,52.20,52.40,52.53,52.67,52.80,52.93,53.07,53.20,53.30,53.60},
+                    new double[]{-2.65,-2.65,-2.65,-2.98,-3.08,-3.03,-3.12,-3.00,-3.16,-2.93,-2.97,-2.92,-3.01,-3.01});
+            if(lon<=border)return region("wales");
+        }
+        Region north=region("north-england"),south=region("south-england");
+        if(north.bounds.contains(lat,lon))return north;
+        if(south.bounds.contains(lat,lon))return south;
+        return null;
+    }
+    private static double interpolate(double value,double[] x,double[] y){
+        if(value<=x[0])return y[0];
+        for(int i=1;i<x.length;i++)if(value<=x[i])return y[i-1]+(y[i]-y[i-1])*(value-x[i-1])/(x[i]-x[i-1]);
+        return y[y.length-1];
+    }
     public static Region region(String id) {
         for (Region region : REGIONS) if (region.id.equals(id)) return region;
         return null;
