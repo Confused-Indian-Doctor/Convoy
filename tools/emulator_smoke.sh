@@ -15,6 +15,7 @@ setup_open=false
 keep_gps_fresh=false
 smoke_gps_longitude=-2.7541
 smoke_gps_latitude=52.7078
+download_proxy_pid=""
 firewall_enabled=false
 offline_chain="CVY_SMOKE_$$"
 capture_diagnostics() {
@@ -39,6 +40,8 @@ capture_diagnostics() {
       adb shell "$firewall" -X "$offline_chain" >/dev/null 2>&1 || true
     done
   fi
+  adb shell settings delete global http_proxy >/dev/null 2>&1 || true
+  if [[ -n "$download_proxy_pid" ]]; then kill "$download_proxy_pid" >/dev/null 2>&1 || true; fi
   rm -rf "$private_dir"
   return "$result"
 }
@@ -442,13 +445,18 @@ if len(visible) < 3:
 with open(sys.argv[2], "w") as output:
     output.write("PASS several UK map regions are visible in the compact list: " + str(len(visible)) + "\n")
 PYROWS
-# The emulator's modem bandwidth limit does not limit its separate virtual Wi-Fi link.
-# Use cellular for this observation, then restore full-speed Wi-Fi for complete installation.
-adb shell svc wifi disable
-adb shell svc data enable
-adb emu network speed edge > build/smoke/download-network-throttle.txt
-sleep 4
-adb shell dumpsys connectivity > build/smoke/download-cellular-connectivity.txt
+# Preserve the actual hosted URLs and end-to-end TLS, but condition the emulator's
+# Wi-Fi download stream so progress/background/cancel can be observed reliably.
+python3 tools/smoke_download_proxy.py --port 9090 --bytes-per-second 524288 > "$private_dir/download-proxy.txt" 2>&1 &
+download_proxy_pid=$!
+for attempt in 1 2 3 4 5; do
+  if grep -q ready "$private_dir/download-proxy.txt"; then break; fi
+  sleep 1
+done
+grep -q ready "$private_dir/download-proxy.txt" || { echo 'Download network conditioner did not start.' >&2; exit 1; }
+adb shell settings put global http_proxy 10.0.2.2:9090
+sleep 2
+printf 'PASS real GitHub URLs with end-to-end TLS; emulator CONNECT tunnel limits download bandwidth to 512 KiB/s for observation.\n' > build/smoke/download-network-throttle.txt
 tap_control description 'Download Northern Ireland' 'real configured Northern Ireland source' true
 tap_control positive Download 'confirm real regional download'
 wait_control transfer '' 'actual nonzero regional download bytes' true 90 >/dev/null
@@ -470,8 +478,10 @@ tap_control positive Download 'confirm retry'
 wait_control transfer '' 'actual bytes on regional retry' true 90 >/dev/null
 tap_control description 'Cancel Northern Ireland' 'cancel retry safely' true
 wait_control prefix 'Download cancelled' 'retry cancelled without installing partial data' true >/dev/null
-adb emu network speed full >/dev/null
-adb shell svc wifi enable
+adb shell settings delete global http_proxy
+kill "$download_proxy_pid"
+wait "$download_proxy_pid" 2>/dev/null || true
+download_proxy_pid=""
 tap_control description 'Retry Northern Ireland' 'complete real regional map after retry' true
 tap_control positive Download 'confirm complete regional download'
 wait_control description 'Open Northern Ireland' 'complete verified regional PMTiles installed' true 180 >/dev/null
