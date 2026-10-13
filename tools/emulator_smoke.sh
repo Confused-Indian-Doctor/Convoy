@@ -203,6 +203,11 @@ import xml.etree.ElementTree as ET
 
 nodes = list(ET.parse(sys.argv[1]).getroot().iter("node"))
 mode, value = sys.argv[2:]
+if mode == "screen":
+    # A closing dialog can still consume Back before the activity regains focus.
+    # Require the activity hierarchy, with no modal window, before sending it.
+    if any(n.get("resource-id") == "android:id/alertTitle" for n in nodes):
+        sys.exit(1)
 if mode == "setup_closed":
     if any(n.get("text") == "Bring your crew together" for n in nodes):
         sys.exit(1)
@@ -216,6 +221,8 @@ for node in nodes:
     text = attrs.get("text", "")
     matches = (
         (mode == "text" and text == value)
+        or (mode == "screen" and text == value and attrs.get("class") == "android.widget.TextView"
+            and attrs.get("package") == "com.convoy.offline")
         or (mode == "title" and text == value and attrs.get("resource-id") == "android:id/alertTitle")
         or (mode == "positive" and text.casefold() == value.casefold() and attrs.get("resource-id") == "android:id/button1")
         or (mode == "edit" and attrs.get("class") == "android.widget.EditText")
@@ -634,6 +641,7 @@ if any(re.fullmatch(r"\d+ min|\d+ h \d+ min", text) for text in texts):
     sys.exit("An unsupported GPX-only ETA appeared outside routing coverage.")
 PYREGIONAL
 tap_control positive OK 'close regional routing-coverage explanation'
+wait_control screen Map 'Map after routing-coverage dialog closes' >/dev/null
 wait_service stopped
 adb shell input keyevent 4
 wait_control text 'convoy' 'Home after standalone regional GPX' >/dev/null
