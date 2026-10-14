@@ -203,6 +203,11 @@ import xml.etree.ElementTree as ET
 
 nodes = list(ET.parse(sys.argv[1]).getroot().iter("node"))
 mode, value = sys.argv[2:]
+if mode == "screen":
+    # A closing dialog can still consume Back before the activity regains focus.
+    # Require the activity hierarchy, with no modal window, before sending it.
+    if any(n.get("resource-id") == "android:id/alertTitle" for n in nodes):
+        sys.exit(1)
 if mode == "setup_closed":
     if any(n.get("text") == "Bring your crew together" for n in nodes):
         sys.exit(1)
@@ -216,8 +221,11 @@ for node in nodes:
     text = attrs.get("text", "")
     matches = (
         (mode == "text" and text == value)
+        or (mode == "screen" and text == value and attrs.get("class") == "android.widget.TextView"
+            and attrs.get("package") == "com.convoy.offline")
         or (mode == "title" and text == value and attrs.get("resource-id") == "android:id/alertTitle")
         or (mode == "positive" and text.casefold() == value.casefold() and attrs.get("resource-id") == "android:id/button1")
+        or (mode == "negative" and text.casefold() == value.casefold() and attrs.get("resource-id") == "android:id/button2")
         or (mode == "edit" and attrs.get("class") == "android.widget.EditText")
         or (mode == "edit_focused" and node is first_edit and attrs.get("focused") == "true")
         or (mode == "edit_text" and node is first_edit and re.sub(r"\s+", "", text).casefold() == value.casefold())
@@ -634,6 +642,7 @@ if any(re.fullmatch(r"\d+ min|\d+ h \d+ min", text) for text in texts):
     sys.exit("An unsupported GPX-only ETA appeared outside routing coverage.")
 PYREGIONAL
 tap_control positive OK 'close regional routing-coverage explanation'
+wait_control screen Map 'Map after routing-coverage dialog closes' >/dev/null
 wait_service stopped
 adb shell input keyevent 4
 wait_control text 'convoy' 'Home after standalone regional GPX' >/dev/null
@@ -698,6 +707,7 @@ wait_control text 'convoy' 'Home before starting secure convoy' >/dev/null
 tap_control text Guide 'network preference in Guide'
 tap_control text 'Convoy network preference' 'consumer transport preference' true
 tap_control text 'Existing Wi-Fi / travel router / vehicle mesh' 'LAN mode for offline emulator host'
+wait_control screen Guide 'Guide after saving LAN preference' >/dev/null
 adb shell input keyevent 4
 wait_control text 'convoy' 'Home after saved LAN preference' >/dev/null
 setup_open=true
@@ -727,7 +737,7 @@ wait_control text 'Accept new drivers' 'paused admission keeps existing session'
 wait_service started
 tap_control text 'Accept new drivers' 'reopen admission' true
 wait_control text 'Stop accepting new drivers' 'admission reopened' true >/dev/null
-tap_control text Close 'close sensitive host QR'
+tap_control negative Close 'close sensitive host QR'
 wait_control text 'convoy' 'Home with active convoy' >/dev/null
 wait_control text 'Show Invite' 'reopen host invite from Home' true >/dev/null
 setup_open=false
@@ -768,6 +778,7 @@ printf 'PASS offline Castle search and road routing produced a numeric ETA with 
 # Stop only this temporary navigation target; leave any saved trip plan intact.
 tap_control text Stop 'Stop navigation button'
 tap_control positive 'Stop route' 'Stop route confirmation button'
+wait_control screen Map 'Map after Stop route confirmation closes' >/dev/null
 adb shell input keyevent 4
 wait_control text 'convoy' 'Home before ending convoy' >/dev/null
 tap_control text 'End Convoy' 'End Convoy action' true
