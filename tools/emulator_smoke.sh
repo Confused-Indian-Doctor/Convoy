@@ -706,6 +706,7 @@ wait_control text 'convoy' 'Home before starting secure convoy' >/dev/null
 tap_control text Guide 'network preference in Guide'
 tap_control text 'Convoy network preference' 'consumer transport preference' true
 tap_control text 'Existing Wi-Fi / travel router / vehicle mesh' 'LAN mode for offline emulator host'
+wait_control screen Guide 'Guide after saving LAN preference' >/dev/null
 adb shell input keyevent 4
 wait_control text 'convoy' 'Home after saved LAN preference' >/dev/null
 setup_open=true
@@ -776,6 +777,7 @@ printf 'PASS offline Castle search and road routing produced a numeric ETA with 
 # Stop only this temporary navigation target; leave any saved trip plan intact.
 tap_control text Stop 'Stop navigation button'
 tap_control positive 'Stop route' 'Stop route confirmation button'
+wait_control screen Map 'Map after Stop route confirmation closes' >/dev/null
 adb shell input keyevent 4
 wait_control text 'convoy' 'Home before ending convoy' >/dev/null
 tap_control text 'End Convoy' 'End Convoy action' true
