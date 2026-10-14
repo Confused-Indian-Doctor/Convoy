@@ -225,6 +225,7 @@ for node in nodes:
             and attrs.get("package") == "com.convoy.offline")
         or (mode == "title" and text == value and attrs.get("resource-id") == "android:id/alertTitle")
         or (mode == "positive" and text.casefold() == value.casefold() and attrs.get("resource-id") == "android:id/button1")
+        or (mode == "negative" and text.casefold() == value.casefold() and attrs.get("resource-id") == "android:id/button2")
         or (mode == "edit" and attrs.get("class") == "android.widget.EditText")
         or (mode == "edit_focused" and node is first_edit and attrs.get("focused") == "true")
         or (mode == "edit_text" and node is first_edit and re.sub(r"\s+", "", text).casefold() == value.casefold())
@@ -736,7 +737,7 @@ wait_control text 'Accept new drivers' 'paused admission keeps existing session'
 wait_service started
 tap_control text 'Accept new drivers' 'reopen admission' true
 wait_control text 'Stop accepting new drivers' 'admission reopened' true >/dev/null
-tap_control text Close 'close sensitive host QR'
+tap_control negative Close 'close sensitive host QR'
 wait_control text 'convoy' 'Home with active convoy' >/dev/null
 wait_control text 'Show Invite' 'reopen host invite from Home' true >/dev/null
 setup_open=false
